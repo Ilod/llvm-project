@@ -141,6 +141,7 @@ macro(add_clang_tool name)
       set_property(GLOBAL PROPERTY CLANG_HAS_EXPORTS True)
     endif()
 
+    set_target_properties(${name} PROPERTIES LLVM_INSTALL_TOOL 1)
     install(TARGETS ${name}
       ${export_to_clangtargets}
       RUNTIME DESTINATION bin
