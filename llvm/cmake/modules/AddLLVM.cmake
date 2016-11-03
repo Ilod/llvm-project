@@ -107,6 +107,12 @@ function(add_llvm_symbol_exports target_name export_file)
       VERBATIM
       COMMENT "Creating export file for ${target_name}")
     set(export_file_linker_flag "${CMAKE_CURRENT_BINARY_DIR}/${native_export_file}")
+    get_target_property(llvm_install_tool ${target_name} LLVM_INSTALL_TOOL)
+    if (${llvm_install_tool})
+      install(FILES ${export_file_linker_flag}
+              DESTINATION lib${LLVM_LIBDIR_SUFFIX}
+              COMPONENT ${target_name})
+    endif()
     if(MSVC)
       set(export_file_linker_flag "/DEF:\"${export_file_linker_flag}\"")
     endif()
@@ -795,6 +801,7 @@ macro(add_llvm_tool name)
 
   if ( ${name} IN_LIST LLVM_TOOLCHAIN_TOOLS OR NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     if( LLVM_BUILD_TOOLS )
+      set_target_properties(${name} PROPERTIES LLVM_INSTALL_TOOL 1)
       install(TARGETS ${name}
               EXPORT LLVMExports
               RUNTIME DESTINATION ${LLVM_TOOLS_INSTALL_DIR}

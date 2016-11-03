@@ -128,6 +128,7 @@ macro(add_clang_tool name)
   add_clang_executable(${name} ${ARGN})
 
   if (CLANG_BUILD_TOOLS)
+    set_target_properties(${name} PROPERTIES LLVM_INSTALL_TOOL 1)
     install(TARGETS ${name}
       RUNTIME DESTINATION bin
       COMPONENT ${name})
