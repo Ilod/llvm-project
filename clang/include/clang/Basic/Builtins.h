@@ -17,11 +17,16 @@
 #define LLVM_CLANG_BASIC_BUILTINS_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/Support/Registry.h"
 #include <cstring>
 
 // VC++ defines 'alloca' as an object-like macro, which interferes with our
 // builtins.
 #undef alloca
+
+namespace llvm {
+class Value;
+}
 
 namespace clang {
 class TargetInfo;
@@ -29,6 +34,10 @@ class IdentifierTable;
 class ASTContext;
 class QualType;
 class LangOptions;
+class CallExpr;
+class Sema;
+class APValue;
+class CodeGenPluginEntryPoint;
 
 enum LanguageID {
   GNU_LANG = 0x1,     // builtin requires GNU mode.
@@ -56,6 +65,27 @@ struct Info {
   const char *Features;
 };
 
+class Handler : public Info {
+public:
+  Handler(const char *name, const char *type, const char *attributes = nullptr,
+          const char *headerName = nullptr, LanguageID langs = ALL_LANGUAGES,
+          const char *features = nullptr);
+  Handler() {}
+  virtual ~Handler() {}
+  virtual llvm::Value* EmitBuiltin(
+                         const clang::CallExpr* E, const clang::ASTContext& Ctx,
+                         const clang::CodeGenPluginEntryPoint& CG) const = 0;
+  virtual bool CheckBuiltinCall(clang::CallExpr* E, const clang::Sema& S) const {
+    return false;
+  }
+  virtual bool Evaluate(const clang::CallExpr* E, const clang::ASTContext& Ctx,
+                        clang::APValue& Value) const {
+    return false;
+  }
+};
+
+typedef llvm::Registry<Handler> BuiltinHandlerRegistry;
+
 /// \brief Holds information about both target-independent and
 /// target-specific builtins, allowing easy queries by clients.
 ///
@@ -65,6 +95,7 @@ struct Info {
 class Context {
   llvm::ArrayRef<Info> TSRecords;
   llvm::ArrayRef<Info> AuxTSRecords;
+  llvm::SmallVector<const Handler*, 2> PluginRecords;
 
 public:
   Context() {}
@@ -196,6 +227,11 @@ public:
     return getRecord(ID).Features;
   }
 
+  bool isPluginBuiltinID(unsigned ID) const {
+    return ID >= (Builtin::FirstTSBuiltin + TSRecords.size() +
+                  AuxTSRecords.size());
+  }
+
   /// \brief Return true if builtin ID belongs to AuxTarget.
   bool isAuxBuiltinID(unsigned ID) const {
     return ID >= (Builtin::FirstTSBuiltin + TSRecords.size());
@@ -204,6 +240,11 @@ public:
   /// Return real buitin ID (i.e. ID it would have furing compilation
   /// for AuxTarget).
   unsigned getAuxBuiltinID(unsigned ID) const { return ID - TSRecords.size(); }
+
+  const Builtin::Handler* getPluginBuiltinHandler(unsigned ID) const {
+    return PluginRecords[ID - Builtin::FirstTSBuiltin -
+                         TSRecords.size() -AuxTSRecords.size()];
+  }
 
   /// Returns true if this is a libc/libm function without the '__builtin_'
   /// prefix.

@@ -4541,6 +4541,9 @@ public:
       FD = dyn_cast<FunctionDecl>(Member);
       if (!FD)
         return Error(Callee);
+    } else if (Info.Ctx.BuiltinInfo.isPluginBuiltinID(E->getBuiltinCallee())) {
+      return Info.Ctx.BuiltinInfo.getPluginBuiltinHandler(E->getBuiltinCallee())
+                 ->Evaluate(E, Info.Ctx, Result);
     } else if (CalleeType->isFunctionPointerType()) {
       LValue Call;
       if (!EvaluatePointer(Callee, Call, Info))

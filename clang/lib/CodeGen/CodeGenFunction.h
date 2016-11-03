@@ -3114,6 +3114,8 @@ public:
                          ReturnValueSlot ReturnValue);
 
   RValue EmitBlockCallExpr(const CallExpr *E, ReturnValueSlot ReturnValue);
+  
+  llvm::Value *EmitPluginBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
 
   /// EmitTargetBuiltinExpr - Emit the given builtin call. Returns 0 if the call
   /// is unhandled by the current target.

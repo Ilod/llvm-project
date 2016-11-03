@@ -73,6 +73,7 @@ add_clang_library(clangCodeGen
   CodeGenFunction.cpp
   CodeGenModule.cpp
   CodeGenPGO.cpp
+  CodeGenPluginEntryPoint.cpp
   CodeGenTBAA.cpp
   CodeGenTypes.cpp
   CoverageMappingGen.cpp
