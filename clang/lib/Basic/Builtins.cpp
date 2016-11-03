@@ -18,6 +18,20 @@
 #include "llvm/ADT/StringRef.h"
 using namespace clang;
 
+// Out-of-line destructor to provide a home for the class.
+Builtin::Handler::Handler(const char *name, const char *type,
+                          const char *attributes, const char *headerName,
+                          LanguageID langs, const char *features) {
+  Name = name;
+  Type = type;
+  Attributes = attributes;
+  HeaderName = headerName;
+  Langs = langs;
+  Features = features;
+}
+
+LLVM_INSTANTIATE_REGISTRY(Builtin::BuiltinHandlerRegistry)
+
 static const Builtin::Info BuiltinInfo[] = {
   { "not a builtin function", nullptr, nullptr, nullptr, ALL_LANGUAGES,nullptr},
 #define BUILTIN(ID, TYPE, ATTRS)                                               \
@@ -33,8 +47,11 @@ const Builtin::Info &Builtin::Context::getRecord(unsigned ID) const {
   if (ID < Builtin::FirstTSBuiltin)
     return BuiltinInfo[ID];
   assert(((ID - Builtin::FirstTSBuiltin) <
-          (TSRecords.size() + AuxTSRecords.size())) &&
+          (TSRecords.size() + AuxTSRecords.size() + PluginRecords.size())) &&
          "Invalid builtin ID!");
+  if (isPluginBuiltinID(ID))
+    return *PluginRecords[ID - Builtin::FirstTSBuiltin -
+                          TSRecords.size() - AuxTSRecords.size()];
   if (isAuxBuiltinID(ID))
     return AuxTSRecords[getAuxBuiltinID(ID) - Builtin::FirstTSBuiltin];
   return TSRecords[ID - Builtin::FirstTSBuiltin];
@@ -46,6 +63,12 @@ void Builtin::Context::InitializeTarget(const TargetInfo &Target,
   TSRecords = Target.getTargetBuiltins();
   if (AuxTarget)
     AuxTSRecords = AuxTarget->getTargetBuiltins();
+  
+  for (BuiltinHandlerRegistry::iterator it = BuiltinHandlerRegistry::begin(),
+                                       ie = BuiltinHandlerRegistry::end();
+       it != ie; ++it) {
+    PluginRecords.push_back(it->instantiate().release());
+  }
 }
 
 bool Builtin::Context::isBuiltinFunc(const char *Name) {
@@ -95,6 +118,11 @@ void Builtin::Context::initializeBuiltins(IdentifierTable &Table,
   for (unsigned i = 0, e = AuxTSRecords.size(); i != e; ++i)
     Table.get(AuxTSRecords[i].Name)
         .setBuiltinID(i + Builtin::FirstTSBuiltin + TSRecords.size());
+
+  for (unsigned i = 0, e = PluginRecords.size(); i != e; ++i)
+    Table.get(PluginRecords[i]->Name)
+        .setBuiltinID(i + Builtin::FirstTSBuiltin +
+                      TSRecords.size() + AuxTSRecords.size());
 }
 
 void Builtin::Context::forgetBuiltin(unsigned ID, IdentifierTable &Table) {

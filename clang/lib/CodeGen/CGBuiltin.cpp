@@ -23,6 +23,7 @@
 #include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
+#include "clang/CodeGen/CodeGenPluginEntryPoint.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/DataLayout.h"
@@ -2794,6 +2795,12 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
     return RValue::get(V);
   }
 
+  if (Value *V = EmitPluginBuiltinExpr(BuiltinID, E)) {
+    CharUnits Alignment = getContext().getAlignOfGlobalVarInChars(
+                                          getContext().CharTy);
+    return RValue::getAggregate(CodeGen::Address(V, Alignment));
+  }
+
   // See if we have a target specific builtin that needs to be lowered.
   if (Value *V = EmitTargetBuiltinExpr(BuiltinID, E))
     return RValue::get(V);
@@ -2837,6 +2844,18 @@ static Value *EmitTargetArchBuiltinExpr(CodeGenFunction *CGF,
   default:
     return nullptr;
   }
+}
+
+Value *CodeGenFunction::EmitPluginBuiltinExpr(unsigned BuiltinID,
+                                              const CallExpr *E) {
+  if (getContext().BuiltinInfo.isPluginBuiltinID(BuiltinID)) {
+    assert(getContext().BuiltinInfo.getPluginBuiltinHandler(BuiltinID) &&
+          "Missing builtin handler");
+    return getContext().BuiltinInfo.getPluginBuiltinHandler(BuiltinID)
+                       ->EmitBuiltin(E, getContext(),
+                                     CodeGenPluginEntryPoint(CGM));
+  }
+  return nullptr;
 }
 
 Value *CodeGenFunction::EmitTargetBuiltinExpr(unsigned BuiltinID,
