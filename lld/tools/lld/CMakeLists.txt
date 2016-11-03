@@ -17,6 +17,10 @@ install(TARGETS lld
 
 if(NOT LLD_SYMLINKS_TO_CREATE)
   set(LLD_SYMLINKS_TO_CREATE lld-link ld.lld)
+  
+  if (WIN32)
+    list(APPEND LLD_SYMLINKS_TO_CREATE ../msbuild-bin/link)
+  endif()
 endif()
 
 foreach(link ${LLD_SYMLINKS_TO_CREATE})
