@@ -39,33 +39,22 @@ def Clr5ImmPred : PatLeaf<(i32 imm), [{
   return isPowerOf2_32(v);
 }]>;
 
-// SDNode for converting immediate C to C-1.
 def DEC_CONST_SIGNED : SDNodeXForm<imm, [{
-   // Return the byte immediate const-1 as an SDNode.
-   int32_t imm = N->getSExtValue();
-   return XformSToSM1Imm(imm, SDLoc(N));
+  int32_t V = N->getSExtValue();
+  return CurDAG->getTargetConstant(V-1, SDLoc(N), MVT::i32);
 }]>;
 
-// SDNode for converting immediate C to C-2.
-def DEC2_CONST_SIGNED : SDNodeXForm<imm, [{
-   // Return the byte immediate const-2 as an SDNode.
-   int32_t imm = N->getSExtValue();
-   return XformSToSM2Imm(imm, SDLoc(N));
-}]>;
-
-// SDNode for converting immediate C to C-3.
-def DEC3_CONST_SIGNED : SDNodeXForm<imm, [{
-   // Return the byte immediate const-3 as an SDNode.
-   int32_t imm = N->getSExtValue();
-   return XformSToSM3Imm(imm, SDLoc(N));
-}]>;
-
-// SDNode for converting immediate C to C-1.
 def DEC_CONST_UNSIGNED : SDNodeXForm<imm, [{
-   // Return the byte immediate const-1 as an SDNode.
-   uint32_t imm = N->getZExtValue();
-   return XformUToUM1Imm(imm, SDLoc(N));
+  uint32_t V = N->getZExtValue();
+  assert(V > 0);
+  return CurDAG->getTargetConstant(V-1, SDLoc(N), MVT::i32);
 }]>;
+
+def BITPOS32 : SDNodeXForm<imm, [{
+  uint32_t V = N->getZExtValue();
+  return CurDAG->getTargetConstant(Log2_32(V), SDLoc(N), MVT::i32);
+}]>;
+
 
 class T_CMP_pat <InstHexagon MI, PatFrag OpNode, PatLeaf ImmPred>
   : Pat<(i1 (OpNode I32:$src1, ImmPred:$src2)),
@@ -359,6 +348,10 @@ def: T_MType_acc_pat3 <M4_or_andn, and, or>;
 def: T_MType_acc_pat3 <M4_and_andn, and, and>;
 def: T_MType_acc_pat3 <M4_xor_andn, and, xor>;
 
+def Aext64: PatFrag<(ops node:$Rs), (i64 (anyext node:$Rs))>;
+def Sext64: PatFrag<(ops node:$Rs), (i64 (sext node:$Rs))>;
+def Zext64: PatFrag<(ops node:$Rs), (i64 (zext node:$Rs))>;
+
 // Return true if for a 32 to 64-bit sign-extended load.
 def Sext64Ld : PatLeaf<(i64 DoubleRegs:$src1), [{
   LoadSDNode *LD = dyn_cast<LoadSDNode>(N);
@@ -368,12 +361,10 @@ def Sext64Ld : PatLeaf<(i64 DoubleRegs:$src1), [{
          LD->getMemoryVT().getScalarType() == MVT::i32;
 }]>;
 
-def: Pat<(i64 (mul (i64 (anyext I32:$src1)),
-		   (i64 (anyext I32:$src2)))),
+def: Pat<(i64 (mul (Aext64 I32:$src1), (Aext64 I32:$src2))),
          (M2_dpmpyuu_s0 IntRegs:$src1, IntRegs:$src2)>;
 
-def: Pat<(i64 (mul (i64 (sext I32:$src1)),
-                   (i64 (sext I32:$src2)))),
+def: Pat<(i64 (mul (Sext64 I32:$src1), (Sext64 I32:$src2))),
          (M2_dpmpyss_s0 IntRegs:$src1, IntRegs:$src2)>;
 
 def: Pat<(i64 (mul Sext64Ld:$src1, Sext64Ld:$src2)),
@@ -382,34 +373,34 @@ def: Pat<(i64 (mul Sext64Ld:$src1, Sext64Ld:$src2)),
 // Multiply and accumulate, use full result.
 // Rxx[+-]=mpy(Rs,Rt)
 
-def: Pat<(i64 (add (i64 DoubleRegs:$src1),
-                   (mul (i64 (sext (i32 IntRegs:$src2))),
-                        (i64 (sext (i32 IntRegs:$src3)))))),
+def: Pat<(i64 (add I64:$src1,
+                   (mul (Sext64 I32:$src2),
+                        (Sext64 I32:$src3)))),
          (M2_dpmpyss_acc_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
 
-def: Pat<(i64 (sub (i64 DoubleRegs:$src1),
-                   (mul (i64 (sext (i32 IntRegs:$src2))),
-                        (i64 (sext (i32 IntRegs:$src3)))))),
+def: Pat<(i64 (sub I64:$src1,
+                   (mul (Sext64 I32:$src2),
+                        (Sext64 I32:$src3)))),
          (M2_dpmpyss_nac_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
 
-def: Pat<(i64 (add (i64 DoubleRegs:$src1),
-                   (mul (i64 (anyext (i32 IntRegs:$src2))),
-                        (i64 (anyext (i32 IntRegs:$src3)))))),
+def: Pat<(i64 (add I64:$src1,
+                   (mul (Aext64 I32:$src2),
+                        (Aext64 I32:$src3)))),
          (M2_dpmpyuu_acc_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
 
-def: Pat<(i64 (add (i64 DoubleRegs:$src1),
-                   (mul (i64 (zext (i32 IntRegs:$src2))),
-                        (i64 (zext (i32 IntRegs:$src3)))))),
+def: Pat<(i64 (add I64:$src1,
+                   (mul (Zext64 I32:$src2),
+                        (Zext64 I32:$src3)))),
          (M2_dpmpyuu_acc_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
 
-def: Pat<(i64 (sub (i64 DoubleRegs:$src1),
-                   (mul (i64 (anyext (i32 IntRegs:$src2))),
-                        (i64 (anyext (i32 IntRegs:$src3)))))),
+def: Pat<(i64 (sub I64:$src1,
+                   (mul (Aext64 I32:$src2),
+                        (Aext64 I32:$src3)))),
          (M2_dpmpyuu_nac_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
 
-def: Pat<(i64 (sub (i64 DoubleRegs:$src1),
-                   (mul (i64 (zext (i32 IntRegs:$src2))),
-                        (i64 (zext (i32 IntRegs:$src3)))))),
+def: Pat<(i64 (sub I64:$src1,
+                   (mul (Zext64 I32:$src2),
+                        (Zext64 I32:$src3)))),
          (M2_dpmpyuu_nac_s0 DoubleRegs:$src1, IntRegs:$src2, IntRegs:$src3)>;
 
 class Storepi_pat<PatFrag Store, PatFrag Value, PatFrag Offset,
@@ -532,7 +523,7 @@ def: Storexm_simple_pat<truncstorei8,  I64, LoReg, S2_storerb_io>;
 def: Storexm_simple_pat<truncstorei16, I64, LoReg, S2_storerh_io>;
 def: Storexm_simple_pat<truncstorei32, I64, LoReg, S2_storeri_io>;
 
-def: Pat <(i64 (sext I32:$src)), (A2_sxtw I32:$src)>;
+def: Pat <(Sext64 I32:$src), (A2_sxtw I32:$src)>;
 
 def: Pat<(i32 (select (i1 (setlt I32:$src, 0)),
                       (i32 (sub 0, I32:$src)),
@@ -1092,6 +1083,11 @@ def: Pat<(HexagonEXTRACTURP I32:$src1, I64:$src2),
 def: Pat<(HexagonEXTRACTURP I64:$src1, I64:$src2),
          (S2_extractup_rp I64:$src1, I64:$src2)>;
 
+def n8_0ImmPred: PatLeaf<(i32 imm), [{
+  int64_t V = N->getSExtValue();
+  return -255 <= V && V <= 0;
+}]>;
+
 // Change the sign of the immediate for Rd=-mpyi(Rs,#u8)
 def: Pat<(mul I32:$src1, (ineg n8_0ImmPred:$src2)),
          (M2_mpysin IntRegs:$src1, u8_0ImmPred:$src2)>;
@@ -1100,7 +1096,7 @@ multiclass MinMax_pats_p<PatFrag Op, InstHexagon Inst, InstHexagon SwapInst> {
   defm: T_MinMax_pats<Op, DoubleRegs, i64, Inst, SwapInst>;
 }
 
-def: Pat<(add (i64 (sext I32:$Rs)), I64:$Rt),
+def: Pat<(add (Sext64 I32:$Rs), I64:$Rt),
          (A2_addsp IntRegs:$Rs, DoubleRegs:$Rt)>;
 
 let AddedComplexity = 200 in {
@@ -1141,13 +1137,6 @@ def : Pat<(callv3nr texternalsym:$dst),
 
 def addrga: PatLeaf<(i32 AddrGA:$Addr)>;
 def addrgp: PatLeaf<(i32 AddrGP:$Addr)>;
-
-def BITPOS32 : SDNodeXForm<imm, [{
-   // Return the bit position we will set [0-31].
-   // As an SDNode.
-   int32_t imm = N->getSExtValue();
-   return XformMskToBitPosU5Imm(imm, SDLoc(N));
-}]>;
 
 
 // Pats for instruction selection.
@@ -1244,7 +1233,7 @@ defm: Loadxm_pat<sextloadi8,  i64, ToSext64, s32_0ImmPred, L2_loadrb_io>;
 defm: Loadxm_pat<sextloadi16, i64, ToSext64, s31_1ImmPred, L2_loadrh_io>;
 
 // Map Rdd = anyext(Rs) -> Rdd = combine(#0, Rs).
-def: Pat<(i64 (anyext I32:$src1)), (ToZext64 IntRegs:$src1)>;
+def: Pat<(Aext64 I32:$src1), (ToZext64 IntRegs:$src1)>;
 
 multiclass T_LoadAbsReg_Pat <PatFrag ldOp, InstHexagon MI, ValueType VT = i32> {
   def  : Pat <(VT (ldOp (add (shl IntRegs:$src1, u2_0ImmPred:$src2),
@@ -1323,7 +1312,7 @@ def: Pat<(i64 (zext I1:$src1)),
          (ToZext64 (C2_muxii PredRegs:$src1, 1, 0))>;
 
 // zext i32->i64
-def: Pat<(i64 (zext I32:$src1)),
+def: Pat<(Zext64 I32:$src1),
          (ToZext64 IntRegs:$src1)>;
 
 let AddedComplexity = 40 in
@@ -1366,8 +1355,8 @@ def s30_2ProperPred  : PatLeaf<(i32 imm), [{
   return isShiftedInt<30,2>(v) && !isShiftedInt<29,3>(v);
 }]>;
 def RoundTo8 : SDNodeXForm<imm, [{
-   int32_t Imm = N->getSExtValue();
-   return CurDAG->getTargetConstant(Imm & -8, SDLoc(N), MVT::i32);
+  int32_t Imm = N->getSExtValue();
+  return CurDAG->getTargetConstant(Imm & -8, SDLoc(N), MVT::i32);
 }]>;
 
 let AddedComplexity = 40 in
@@ -1647,53 +1636,60 @@ def: Pat<(shl s6_0ImmPred:$s6, I32:$Rt),
 //===----------------------------------------------------------------------===//
 
 def m5_0Imm8Pred : PatLeaf<(i32 imm), [{
-  int8_t v = (int8_t)N->getSExtValue();
-  return v > -32 && v <= -1;
+  int8_t V = N->getSExtValue();
+  return V > -32 && V <= -1;
 }]>;
 
 def m5_0Imm16Pred : PatLeaf<(i32 imm), [{
-  int16_t v = (int16_t)N->getSExtValue();
-  return v > -32 && v <= -1;
+  int16_t V = N->getSExtValue();
+  return V > -32 && V <= -1;
+}]>;
+
+def m5_0ImmPred  : PatLeaf<(i32 imm), [{
+  // m5_0ImmPred predicate - True if the number is in range -1 .. -31
+  // and will fit in a 5 bit field when made positive, for use in memops.
+  int64_t v = (int64_t)N->getSExtValue();
+  return (-31 <= v && v <= -1);
 }]>;
 
 def Clr5Imm8Pred : PatLeaf<(i32 imm), [{
-  uint32_t v = (uint8_t)~N->getZExtValue();
-  return ImmIsSingleBit(v);
+  uint8_t V = ~N->getZExtValue();
+  return isPowerOf2_32(V);
 }]>;
 
 def Clr5Imm16Pred : PatLeaf<(i32 imm), [{
-  uint32_t v = (uint16_t)~N->getZExtValue();
-  return ImmIsSingleBit(v);
+  uint16_t V = ~N->getZExtValue();
+  return isPowerOf2_32(V);
 }]>;
 
 def Set5Imm8 : SDNodeXForm<imm, [{
-   uint32_t imm = (uint8_t)N->getZExtValue();
-   return XformMskToBitPosU5Imm(imm, SDLoc(N));
+  uint8_t V = N->getZExtValue();
+  return CurDAG->getTargetConstant(Log2_32(V), SDLoc(N), MVT::i32);
 }]>;
 
 def Set5Imm16 : SDNodeXForm<imm, [{
-   uint32_t imm = (uint16_t)N->getZExtValue();
-   return XformMskToBitPosU5Imm(imm, SDLoc(N));
+  uint16_t V = N->getZExtValue();
+  return CurDAG->getTargetConstant(Log2_32(V), SDLoc(N), MVT::i32);
 }]>;
 
 def Set5Imm32 : SDNodeXForm<imm, [{
-   uint32_t imm = (uint32_t)N->getZExtValue();
-   return XformMskToBitPosU5Imm(imm, SDLoc(N));
+  uint32_t V = N->getZExtValue();
+  return CurDAG->getTargetConstant(Log2_32(V), SDLoc(N), MVT::i32);
 }]>;
 
 def Clr5Imm8 : SDNodeXForm<imm, [{
-   uint32_t imm = (uint8_t)~N->getZExtValue();
-   return XformMskToBitPosU5Imm(imm, SDLoc(N));
+  uint8_t V = ~N->getZExtValue();
+  return CurDAG->getTargetConstant(Log2_32(V), SDLoc(N), MVT::i32);
 }]>;
 
 def Clr5Imm16 : SDNodeXForm<imm, [{
-   uint32_t imm = (uint16_t)~N->getZExtValue();
-   return XformMskToBitPosU5Imm(imm, SDLoc(N));
+  uint16_t V = ~N->getZExtValue();
+  return CurDAG->getTargetConstant(Log2_32(V), SDLoc(N), MVT::i32);
 }]>;
 
 def Clr5Imm32 : SDNodeXForm<imm, [{
-   int32_t imm = (int32_t)~N->getZExtValue();
-   return XformMskToBitPosU5Imm(imm, SDLoc(N));
+  uint32_t V = ~N->getZExtValue();
+  return CurDAG->getTargetConstant(Log2_32(V), SDLoc(N), MVT::i32);
 }]>;
 
 def NegImm8 : SDNodeXForm<imm, [{
@@ -1707,7 +1703,8 @@ def NegImm16 : SDNodeXForm<imm, [{
 }]>;
 
 def NegImm32 : SDNodeXForm<imm, [{
-  return CurDAG->getTargetConstant(-N->getSExtValue(), SDLoc(N), MVT::i32);
+  int32_t V = N->getSExtValue();
+  return CurDAG->getTargetConstant(-V, SDLoc(N), MVT::i32);
 }]>;
 
 def IdImm : SDNodeXForm<imm, [{ return SDValue(N, 0); }]>;
@@ -1953,16 +1950,17 @@ def: Pat<(i1 (setlt I32:$src1, s32_0ImmPred:$src2)),
 def: Pat<(i1 (setne I32:$src1, s32_0ImmPred:$src2)),
          (C4_cmpneqi IntRegs:$src1, s32_0ImmPred:$src2)>;
 
-// SDNode for converting immediate C to C-1.
-def DEC_CONST_BYTE : SDNodeXForm<imm, [{
-   // Return the byte immediate const-1 as an SDNode.
-   int32_t imm = N->getSExtValue();
-   return XformU7ToU7M1Imm(imm, SDLoc(N));
-}]>;
-
 // For the sequence
 //   zext( setult ( and(Rs, 255), u8))
 // Use the isdigit transformation below
+
+
+def u7_0PosImmPred : ImmLeaf<i32, [{
+  // True if the immediate fits in an 7-bit unsigned field and
+  // is strictly greater than 0.
+  return Imm > 0 && isUInt<7>(Imm);
+}]>;
+
 
 // Generate code of the form 'C2_muxii(cmpbgtui(Rdd, C-1),0,1)'
 // for C code of the form r = ((c>='0') & (c<='9')) ? 1 : 0;.
@@ -1976,12 +1974,11 @@ def DEC_CONST_BYTE : SDNodeXForm<imm, [{
 //   retval = ((c>='0') & (c<='9')) ? 1 : 0;
 // The code is transformed upstream of llvm into
 //   retval = (c-48) < 10 ? 1 : 0;
+
 let AddedComplexity = 139 in
 def: Pat<(i32 (zext (i1 (setult (i32 (and I32:$src1, 255)),
-                         u7_0StrictPosImmPred:$src2)))),
-         (C2_muxii (A4_cmpbgtui IntRegs:$src1,
-                    (DEC_CONST_BYTE u7_0StrictPosImmPred:$src2)),
-          0, 1)>;
+                         u7_0PosImmPred:$src2)))),
+         (C2_muxii (A4_cmpbgtui IntRegs:$src1, (DEC_CONST_UNSIGNED imm:$src2)), 0, 1)>;
 
 class Loada_pat<PatFrag Load, ValueType VT, PatFrag Addr, InstHexagon MI>
   : Pat<(VT (Load Addr:$addr)), (MI Addr:$addr)>;
@@ -2183,7 +2180,7 @@ def: Pat<(or (or (or (shl (i64 (zext (i32 (and I32:$b, (i32 65535))))),
                      (i64 (zext (i32 (and I32:$a, (i32 65535)))))),
                  (shl (i64 (anyext (i32 (and I32:$c, (i32 65535))))),
                       (i32 32))),
-             (shl (i64 (anyext I32:$d)), (i32 48))),
+             (shl (Aext64 I32:$d), (i32 48))),
          (Insert4 IntRegs:$a, IntRegs:$b, IntRegs:$c, IntRegs:$d)>;
 
 // We need custom lowering of ISD::PREFETCH into HexagonISD::DCFETCH
@@ -2683,6 +2680,17 @@ def alignedstore : PatFrag<(ops node:$val, node:$addr), (store $val, $addr), [{
 
 def unalignedstore : PatFrag<(ops node:$val, node:$addr), (store $val, $addr), [{
   return !isAlignedMemNode(dyn_cast<MemSDNode>(N));
+}]>;
+
+
+def s4_6ImmPred: PatLeaf<(i32 imm), [{
+  int64_t V = N->getSExtValue();
+  return isShiftedInt<4,6>(V);
+}]>;
+
+def s4_7ImmPred: PatLeaf<(i32 imm), [{
+  int64_t V = N->getSExtValue();
+  return isShiftedInt<4,7>(V);
 }]>;
 
 
