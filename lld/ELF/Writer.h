@@ -16,13 +16,14 @@
 
 namespace lld {
 namespace elf {
+class InputFile;
 template <class ELFT> class OutputSectionBase;
 template <class ELFT> class InputSectionBase;
 template <class ELFT> class ObjectFile;
 template <class ELFT> class SymbolTable;
 template <class ELFT> void writeResult();
 template <class ELFT> void markLive();
-template <class ELFT> bool isRelroSection(OutputSectionBase<ELFT> *Sec);
+template <class ELFT> bool isRelroSection(const OutputSectionBase<ELFT> *Sec);
 
 // This describes a program header entry.
 // Each contains type, access flags and range of output sections that will be
@@ -45,6 +46,8 @@ template <class ELFT> uint32_t getMipsEFlags();
 
 uint8_t getMipsFpAbiFlag(uint8_t OldFlag, uint8_t NewFlag,
                          llvm::StringRef FileName);
+
+bool isMipsN32Abi(const InputFile *F);
 }
 }
 

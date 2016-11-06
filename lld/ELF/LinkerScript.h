@@ -14,16 +14,19 @@
 #include "Strings.h"
 #include "Writer.h"
 #include "lld/Core/LLVM.h"
-#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/MapVector.h"
-#include "llvm/Support/Allocator.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/Regex.h"
+#include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <memory>
+#include <vector>
 
 namespace lld {
 namespace elf {
+
 class DefinedCommon;
 class ScriptParser;
 class SymbolBody;
@@ -68,7 +71,9 @@ enum SectionsCommandKind {
 
 struct BaseCommand {
   BaseCommand(int K) : Kind(K) {}
-  virtual ~BaseCommand() {}
+
+  virtual ~BaseCommand() = default;
+
   int Kind;
 };
 
@@ -76,6 +81,7 @@ struct BaseCommand {
 struct SymbolAssignment : BaseCommand {
   SymbolAssignment(StringRef Name, Expr E)
       : BaseCommand(AssignmentKind), Name(Name), Expression(E) {}
+
   static bool classof(const BaseCommand *C);
 
   // The LHS of an expression. Name is either a symbol name or ".".
@@ -99,7 +105,9 @@ enum class ConstraintKind { NoConstraint, ReadOnly, ReadWrite };
 struct OutputSectionCommand : BaseCommand {
   OutputSectionCommand(StringRef Name)
       : BaseCommand(OutputSectionKind), Name(Name) {}
+
   static bool classof(const BaseCommand *C);
+
   StringRef Name;
   Expr AddrExpr;
   Expr AlignExpr;
@@ -115,29 +123,22 @@ struct OutputSectionCommand : BaseCommand {
 // It can optionally have negative match pattern for EXCLUDED_FILE command.
 // Also it may be surrounded with SORT() command, so contains sorting rules.
 struct SectionPattern {
-  SectionPattern(llvm::Regex &&Re1, llvm::Regex &&Re2)
-      : ExcludedFileRe(std::forward<llvm::Regex>(Re1)),
-        SectionRe(std::forward<llvm::Regex>(Re2)) {}
+  SectionPattern(StringMatcher &&Pat1, StringMatcher &&Pat2)
+      : ExcludedFilePat(Pat1), SectionPat(Pat2) {}
 
-  SectionPattern(SectionPattern &&Other) {
-    std::swap(ExcludedFileRe, Other.ExcludedFileRe);
-    std::swap(SectionRe, Other.SectionRe);
-    std::swap(SortOuter, Other.SortOuter);
-    std::swap(SortInner, Other.SortInner);
-  }
-
-  llvm::Regex ExcludedFileRe;
-  llvm::Regex SectionRe;
+  StringMatcher ExcludedFilePat;
+  StringMatcher SectionPat;
   SortSectionPolicy SortOuter;
   SortSectionPolicy SortInner;
 };
 
 struct InputSectionDescription : BaseCommand {
   InputSectionDescription(StringRef FilePattern)
-      : BaseCommand(InputSectionKind),
-        FileRe(compileGlobPatterns({FilePattern})) {}
+      : BaseCommand(InputSectionKind), FilePat({FilePattern}) {}
+
   static bool classof(const BaseCommand *C);
-  llvm::Regex FileRe;
+
+  StringMatcher FilePat;
 
   // Input sections that matches at least one of SectionPatterns
   // will be associated with this InputSectionDescription.
@@ -149,7 +150,9 @@ struct InputSectionDescription : BaseCommand {
 // Represents an ASSERT().
 struct AssertCommand : BaseCommand {
   AssertCommand(Expr E) : BaseCommand(AssertKind), Expression(E) {}
+
   static bool classof(const BaseCommand *C);
+
   Expr Expression;
 };
 
@@ -157,7 +160,9 @@ struct AssertCommand : BaseCommand {
 struct BytesDataCommand : BaseCommand {
   BytesDataCommand(uint64_t Data, unsigned Size)
       : BaseCommand(BytesDataKind), Data(Data), Size(Size) {}
+
   static bool classof(const BaseCommand *C);
+
   uint64_t Data;
   unsigned Offset;
   unsigned Size;
@@ -211,6 +216,7 @@ template <class ELFT> class LinkerScript final : public LinkerScriptBase {
 public:
   LinkerScript();
   ~LinkerScript();
+
   void processCommands(OutputSectionFactory<ELFT> &Factory);
   void createSections(OutputSectionFactory<ELFT> &Factory);
   void adjustSectionsBeforeSorting();
@@ -273,7 +279,7 @@ template <class ELFT> LinkerScript<ELFT> *Script<ELFT>::X;
 
 extern LinkerScriptBase *ScriptBase;
 
-} // namespace elf
-} // namespace lld
+} // end namespace elf
+} // end namespace lld
 
-#endif
+#endif // LLD_ELF_LINKER_SCRIPT_H

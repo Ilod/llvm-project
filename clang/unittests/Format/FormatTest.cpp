@@ -5501,6 +5501,18 @@ TEST_F(FormatTest, UnderstandsTemplateParameters) {
   verifyFormat("< < < < < < < < < < < < < < < < < < < < < < < < < < < < < <");
 }
 
+TEST_F(FormatTest, BitshiftOperatorWidth) {
+  EXPECT_EQ("int a = 1 << 2; /* foo\n"
+            "                   bar */",
+            format("int    a=1<<2;  /* foo\n"
+                   "                   bar */"));
+
+  EXPECT_EQ("int b = 256 >> 1; /* foo\n"
+            "                     bar */",
+            format("int  b  =256>>1 ;  /* foo\n"
+                   "                      bar */"));
+}
+
 TEST_F(FormatTest, UnderstandsBinaryOperators) {
   verifyFormat("COMPARE(a, ==, b);");
   verifyFormat("auto s = sizeof...(Ts) - 1;");
@@ -11379,6 +11391,8 @@ TEST_F(FormatTest, TripleAngleBrackets) {
   EXPECT_EQ("f<param><<<1, 1>>>();", format("f< param > <<< 1, 1 >>> ();"));
   verifyFormat("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                "aaaaaaaaaaa<<<\n    1, 1>>>();");
+  verifyFormat("aaaaaaaaaaaaaaa<aaaaaaaaa, aaaaaaaaaa, aaaaaaaaaaaaaa>\n"
+               "    <<<aaaaaaaaa, aaaaaaaaaa, aaaaaaaaaaaaaaaaaa>>>();");
 }
 
 TEST_F(FormatTest, MergeLessLessAtEnd) {

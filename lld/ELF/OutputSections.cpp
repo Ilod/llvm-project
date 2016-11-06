@@ -15,6 +15,7 @@
 #include "Memory.h"
 #include "Strings.h"
 #include "SymbolTable.h"
+#include "SyntheticSections.h"
 #include "Target.h"
 #include "lld/Core/Parallel.h"
 #include "llvm/Support/Dwarf.h"
@@ -1177,11 +1178,11 @@ void EhOutputSection<ELFT>::addSection(InputSectionBase<ELFT> *C) {
     return;
 
   if (const Elf_Shdr *RelSec = Sec->RelocSection) {
-    ELFFile<ELFT> &Obj = Sec->getFile()->getObj();
+    ELFFile<ELFT> Obj = Sec->getFile()->getObj();
     if (RelSec->sh_type == SHT_RELA)
-      addSectionAux(Sec, Obj.relas(RelSec));
+      addSectionAux(Sec, check(Obj.relas(RelSec)));
     else
-      addSectionAux(Sec, Obj.rels(RelSec));
+      addSectionAux(Sec, check(Obj.rels(RelSec)));
     return;
   }
   addSectionAux(Sec, makeArrayRef<Elf_Rela>(nullptr, nullptr));
@@ -1556,7 +1557,7 @@ SymbolTableSection<ELFT>::getOutputSection(SymbolBody *Sym) {
     break;
   }
   case SymbolBody::DefinedCommonKind:
-    return InputSection<ELFT>::CommonInputSection->OutSec;
+    return In<ELFT>::Common->OutSec;
   case SymbolBody::SharedKind:
     if (cast<SharedSymbol<ELFT>>(Sym)->needsCopy())
       return Out<ELFT>::Bss;

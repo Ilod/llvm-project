@@ -426,9 +426,9 @@ void InputSectionBase<ELFT>::relocate(uint8_t *Buf, uint8_t *BufEnd) {
   if (IS && !(IS->Flags & SHF_ALLOC)) {
     for (const Elf_Shdr *RelSec : IS->RelocSections) {
       if (RelSec->sh_type == SHT_RELA)
-        IS->relocateNonAlloc(Buf, IS->File->getObj().relas(RelSec));
+        IS->relocateNonAlloc(Buf, check(IS->File->getObj().relas(RelSec)));
       else
-        IS->relocateNonAlloc(Buf, IS->File->getObj().rels(RelSec));
+        IS->relocateNonAlloc(Buf, check(IS->File->getObj().rels(RelSec)));
     }
     return;
   }
@@ -563,11 +563,11 @@ template <class ELFT> void EhInputSection<ELFT>::split() {
     return;
 
   if (RelocSection) {
-    ELFFile<ELFT> &Obj = this->File->getObj();
+    ELFFile<ELFT> Obj = this->File->getObj();
     if (RelocSection->sh_type == SHT_RELA)
-      split(Obj.relas(RelocSection));
+      split(check(Obj.relas(RelocSection)));
     else
-      split(Obj.rels(RelocSection));
+      split(check(Obj.rels(RelocSection)));
     return;
   }
   split(makeArrayRef<typename ELFT::Rela>(nullptr, nullptr));
@@ -823,31 +823,6 @@ MipsAbiFlagsInputSection<ELFT>::MipsAbiFlagsInputSection(
 template <class ELFT>
 bool MipsAbiFlagsInputSection<ELFT>::classof(const InputSectionData *S) {
   return S->kind() == InputSectionBase<ELFT>::MipsAbiFlags;
-}
-
-template <class ELFT>
-InputSection<ELFT> InputSection<ELFT>::createCommonInputSection(
-    std::vector<DefinedCommon *> Syms) {
-  // Sort the common symbols by alignment as an heuristic to pack them better.
-  std::stable_sort(Syms.begin(), Syms.end(),
-                   [](const DefinedCommon *A, const DefinedCommon *B) {
-                     return A->Alignment > B->Alignment;
-                   });
-
-  size_t Size = 0;
-  uintX_t Alignment = 1;
-  for (DefinedCommon *Sym : Syms) {
-    Alignment = std::max<uintX_t>(Alignment, Sym->Alignment);
-    Size = alignTo(Size, Sym->Alignment);
-
-    // Compute symbol offset relative to beginning of input section.
-    Sym->Offset = Size;
-    Size += Sym->Size;
-  }
-  ArrayRef<uint8_t> Data = makeArrayRef<uint8_t>(nullptr, Size);
-  InputSection Ret(SHF_ALLOC | SHF_WRITE, SHT_NOBITS, Alignment, Data, "");
-  Ret.Live = true;
-  return Ret;
 }
 
 template class elf::InputSectionBase<ELF32LE>;

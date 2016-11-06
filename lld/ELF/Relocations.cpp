@@ -402,7 +402,7 @@ template <class ELFT> static void addCopyRelSymbol(SharedSymbol<ELFT> *SS) {
   // Look through the DSO's dynamic symbol table for aliases and create a
   // dynamic symbol for each one. This causes the copy relocation to correctly
   // interpose any aliases.
-  for (const Elf_Sym &S : SS->file()->getElfSymbols(true)) {
+  for (const Elf_Sym &S : SS->file()->getGlobalSymbols()) {
     if (S.st_shndx != Shndx || S.st_value != Value)
       continue;
     auto *Alias = dyn_cast_or_null<SharedSymbol<ELFT>>(
@@ -585,6 +585,22 @@ static void reportUndefined(SymbolBody &Sym, InputSectionBase<ELFT> &S,
     error(Msg);
 }
 
+template <class RelTy>
+static std::pair<uint32_t, uint32_t>
+mergeMipsN32RelTypes(uint32_t Type, uint32_t Offset, RelTy *I, RelTy *E) {
+  // MIPS N32 ABI treats series of successive relocations with the same offset
+  // as a single relocation. The similar approach used by N64 ABI, but this ABI
+  // packs all relocations into the single relocation record. Here we emulate
+  // this for the N32 ABI. Iterate over relocation with the same offset and put
+  // theirs types into the single bit-set.
+  uint32_t Processed = 0;
+  for (; I != E && Offset == I->r_offset; ++I) {
+    ++Processed;
+    Type |= I->getType(Config->Mips64EL) << (8 * Processed);
+  }
+  return std::make_pair(Type, Processed);
+}
+
 // The reason we have to do this early scan is as follows
 // * To mmap the output file, we need to know the size
 // * For that, we need to know how many dynamic relocs we will have.
@@ -623,6 +639,13 @@ static void scanRelocs(InputSectionBase<ELFT> &C, ArrayRef<RelTy> Rels) {
     const RelTy &RI = *I;
     SymbolBody &Body = File.getRelocTargetSym(RI);
     uint32_t Type = RI.getType(Config->Mips64EL);
+
+    if (Config->MipsN32Abi) {
+      uint32_t Processed;
+      std::tie(Type, Processed) =
+          mergeMipsN32RelTypes(Type, RI.r_offset, I + 1, E);
+      I += Processed;
+    }
 
     // We only report undefined symbols if they are referenced somewhere in the
     // code.
@@ -776,11 +799,11 @@ static void scanRelocs(InputSectionBase<ELFT> &C, ArrayRef<RelTy> Rels) {
 template <class ELFT>
 void scanRelocations(InputSectionBase<ELFT> &S,
                      const typename ELFT::Shdr &RelSec) {
-  ELFFile<ELFT> &EObj = S.getFile()->getObj();
+  ELFFile<ELFT> EObj = S.getFile()->getObj();
   if (RelSec.sh_type == SHT_RELA)
-    scanRelocs(S, EObj.relas(&RelSec));
+    scanRelocs(S, check(EObj.relas(&RelSec)));
   else
-    scanRelocs(S, EObj.rels(&RelSec));
+    scanRelocs(S, check(EObj.rels(&RelSec)));
 }
 
 template <class ELFT, class RelTy>
@@ -806,11 +829,11 @@ static void createThunks(InputSectionBase<ELFT> &C, ArrayRef<RelTy> Rels) {
 template <class ELFT>
 void createThunks(InputSectionBase<ELFT> &S,
                   const typename ELFT::Shdr &RelSec) {
-  ELFFile<ELFT> &EObj = S.getFile()->getObj();
+  ELFFile<ELFT> EObj = S.getFile()->getObj();
   if (RelSec.sh_type == SHT_RELA)
-    createThunks(S, EObj.relas(&RelSec));
+    createThunks(S, check(EObj.relas(&RelSec)));
   else
-    createThunks(S, EObj.rels(&RelSec));
+    createThunks(S, check(EObj.rels(&RelSec)));
 }
 
 template void scanRelocations<ELF32LE>(InputSectionBase<ELF32LE> &,

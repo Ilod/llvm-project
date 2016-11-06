@@ -105,6 +105,11 @@ StringRef elf::getOutputSectionName(StringRef Name) {
       return Prefix;
   }
 
+  // CommonSection is identified as "COMMON" in linker scripts.
+  // By default, it should go to .bss section.
+  if (Name == "COMMON")
+    return ".bss";
+
   // ".zdebug_" is a prefix for ZLIB-compressed sections.
   // Because we decompressed input sections, we want to remove 'z'.
   if (Name.startswith(".zdebug_"))
@@ -130,14 +135,6 @@ template <class ELFT> void elf::writeResult() {
   Writer<ELFT>().run();
 }
 
-template <class ELFT> static std::vector<DefinedCommon *> getCommonSymbols() {
-  std::vector<DefinedCommon *> V;
-  for (Symbol *S : Symtab<ELFT>::X->getSymbols())
-    if (auto *B = dyn_cast<DefinedCommon>(S->body()))
-      V.push_back(B);
-  return V;
-}
-
 // The main function of the writer.
 template <class ELFT> void Writer<ELFT>::run() {
   createSyntheticSections();
@@ -145,10 +142,6 @@ template <class ELFT> void Writer<ELFT>::run() {
 
   if (Target->NeedsThunks)
     forEachRelSec(createThunks<ELFT>);
-
-  InputSection<ELFT> Common =
-      InputSection<ELFT>::createCommonInputSection(getCommonSymbols<ELFT>());
-  InputSection<ELFT>::CommonInputSection = &Common;
 
   Script<ELFT>::X->OutputSections = &OutputSections;
   if (ScriptConfig->HasSections) {
@@ -234,8 +227,12 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
   Out<ELFT>::ProgramHeaders = make<OutputSectionBase<ELFT>>("", 0, SHF_ALLOC);
   Out<ELFT>::ProgramHeaders->updateAlignment(sizeof(uintX_t));
 
-  if (needsInterpSection<ELFT>())
+  if (needsInterpSection<ELFT>()) {
     In<ELFT>::Interp = make<InterpSection<ELFT>>();
+    Symtab<ELFT>::X->Sections.push_back(In<ELFT>::Interp);
+  } else {
+    In<ELFT>::Interp = nullptr;
+  }
 
   if (!Symtab<ELFT>::X->getSharedFiles().empty() || Config->Pic) {
     Out<ELFT>::DynSymTab =
@@ -284,8 +281,17 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
     In<ELFT>::BuildId = make<BuildIdUuid<ELFT>>();
   else if (Config->BuildId == BuildIdKind::Hexstring)
     In<ELFT>::BuildId = make<BuildIdHexstring<ELFT>>();
+  else
+    In<ELFT>::BuildId = nullptr;
 
-  In<ELFT>::Sections = {In<ELFT>::BuildId, In<ELFT>::Interp};
+  if (In<ELFT>::BuildId)
+    Symtab<ELFT>::X->Sections.push_back(In<ELFT>::BuildId);
+
+  CommonSection<ELFT> *Common = make<CommonSection<ELFT>>();
+  if (!Common->Data.empty()) {
+    In<ELFT>::Common = Common;
+    Symtab<ELFT>::X->Sections.push_back(Common);
+  }
 }
 
 template <class ELFT>
@@ -385,7 +391,8 @@ static int getPPC64SectionRank(StringRef SectionName) {
       .Default(1);
 }
 
-template <class ELFT> bool elf::isRelroSection(OutputSectionBase<ELFT> *Sec) {
+template <class ELFT>
+bool elf::isRelroSection(const OutputSectionBase<ELFT> *Sec) {
   if (!Config->ZRelro)
     return false;
   typename ELFT::uint Flags = Sec->getFlags();
@@ -407,8 +414,8 @@ template <class ELFT> bool elf::isRelroSection(OutputSectionBase<ELFT> *Sec) {
 }
 
 template <class ELFT>
-static bool compareSectionsNonScript(OutputSectionBase<ELFT> *A,
-                                     OutputSectionBase<ELFT> *B) {
+static bool compareSectionsNonScript(const OutputSectionBase<ELFT> *A,
+                                     const OutputSectionBase<ELFT> *B) {
   // Put .interp first because some loaders want to see that section
   // on the first page of the executable file when loaded into memory.
   bool AIsInterp = A->getName() == ".interp";
@@ -489,8 +496,8 @@ static bool compareSectionsNonScript(OutputSectionBase<ELFT> *A,
 
 // Output section ordering is determined by this function.
 template <class ELFT>
-static bool compareSections(OutputSectionBase<ELFT> *A,
-                            OutputSectionBase<ELFT> *B) {
+static bool compareSections(const OutputSectionBase<ELFT> *A,
+                            const OutputSectionBase<ELFT> *B) {
   // For now, put sections mentioned in a linker script first.
   int AIndex = Script<ELFT>::X->getSectionIndex(A->getName());
   int BIndex = Script<ELFT>::X->getSectionIndex(B->getName());
@@ -645,26 +652,24 @@ template <class ELFT>
 void Writer<ELFT>::forEachRelSec(
     std::function<void(InputSectionBase<ELFT> &, const typename ELFT::Shdr &)>
         Fn) {
-  for (elf::ObjectFile<ELFT> *F : Symtab<ELFT>::X->getObjectFiles()) {
-    for (InputSectionBase<ELFT> *IS : F->getSections()) {
-      if (isDiscarded(IS))
-        continue;
-      // Scan all relocations. Each relocation goes through a series
-      // of tests to determine if it needs special treatment, such as
-      // creating GOT, PLT, copy relocations, etc.
-      // Note that relocations for non-alloc sections are directly
-      // processed by InputSection::relocateNonAlloc.
-      if (!(IS->Flags & SHF_ALLOC))
-        continue;
-      if (auto *S = dyn_cast<InputSection<ELFT>>(IS)) {
-        for (const Elf_Shdr *RelSec : S->RelocSections)
-          Fn(*S, *RelSec);
-        continue;
-      }
-      if (auto *S = dyn_cast<EhInputSection<ELFT>>(IS))
-        if (S->RelocSection)
-          Fn(*S, *S->RelocSection);
+  for (InputSectionBase<ELFT> *IS : Symtab<ELFT>::X->Sections) {
+    if (isDiscarded(IS))
+      continue;
+    // Scan all relocations. Each relocation goes through a series
+    // of tests to determine if it needs special treatment, such as
+    // creating GOT, PLT, copy relocations, etc.
+    // Note that relocations for non-alloc sections are directly
+    // processed by InputSection::relocateNonAlloc.
+    if (!(IS->Flags & SHF_ALLOC))
+      continue;
+    if (auto *S = dyn_cast<InputSection<ELFT>>(IS)) {
+      for (const Elf_Shdr *RelSec : S->RelocSections)
+        Fn(*S, *RelSec);
+      continue;
     }
+    if (auto *S = dyn_cast<EhInputSection<ELFT>>(IS))
+      if (S->RelocSection)
+        Fn(*S, *S->RelocSection);
   }
 }
 
@@ -684,13 +689,8 @@ void Writer<ELFT>::addInputSec(InputSectionBase<ELFT> *IS) {
 }
 
 template <class ELFT> void Writer<ELFT>::createSections() {
-  for (elf::ObjectFile<ELFT> *F : Symtab<ELFT>::X->getObjectFiles())
-    for (InputSectionBase<ELFT> *IS : F->getSections())
-      addInputSec(IS);
-
-  for (BinaryFile *F : Symtab<ELFT>::X->getBinaryFiles())
-    for (InputSectionData *ID : F->getSections())
-      addInputSec(cast<InputSection<ELFT>>(ID));
+  for (InputSectionBase<ELFT> *IS : Symtab<ELFT>::X->Sections)
+    addInputSec(IS);
 
   sortInitFini(findSection(".init_array"));
   sortInitFini(findSection(".fini_array"));
@@ -809,21 +809,9 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
   if (HasError)
     return;
 
-  // If linker script processor hasn't added common symbol section yet,
-  // then add it to .bss now.
-  if (!InputSection<ELFT>::CommonInputSection->OutSec) {
-    Out<ELFT>::Bss->addSection(InputSection<ELFT>::CommonInputSection);
-    Out<ELFT>::Bss->assignOffsets();
-  }
-
   // So far we have added sections from input object files.
   // This function adds linker-created Out<ELFT>::* sections.
   addPredefinedSections();
-
-  // Adds linker generated input sections to
-  // corresponding output sections.
-  for (InputSection<ELFT> *S : In<ELFT>::Sections)
-    addInputSec(S);
 
   sortSections();
 
@@ -832,11 +820,6 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
     Sec->SectionIndex = I++;
     Sec->setSHName(Out<ELFT>::ShStrTab->addString(Sec->getName()));
   }
-
-  // Finalize linker generated sections.
-  for (InputSection<ELFT> *S : In<ELFT>::Sections)
-    if (S && S->OutSec)
-      S->OutSec->assignOffsets();
 
   // Finalizers fix each section's size.
   // .dynsym is finalized early since that may fill up .gnu.hash.
@@ -1473,10 +1456,10 @@ template struct elf::PhdrEntry<ELF32BE>;
 template struct elf::PhdrEntry<ELF64LE>;
 template struct elf::PhdrEntry<ELF64BE>;
 
-template bool elf::isRelroSection<ELF32LE>(OutputSectionBase<ELF32LE> *);
-template bool elf::isRelroSection<ELF32BE>(OutputSectionBase<ELF32BE> *);
-template bool elf::isRelroSection<ELF64LE>(OutputSectionBase<ELF64LE> *);
-template bool elf::isRelroSection<ELF64BE>(OutputSectionBase<ELF64BE> *);
+template bool elf::isRelroSection<ELF32LE>(const OutputSectionBase<ELF32LE> *);
+template bool elf::isRelroSection<ELF32BE>(const OutputSectionBase<ELF32BE> *);
+template bool elf::isRelroSection<ELF64LE>(const OutputSectionBase<ELF64LE> *);
+template bool elf::isRelroSection<ELF64BE>(const OutputSectionBase<ELF64BE> *);
 
 template void elf::reportDiscarded<ELF32LE>(InputSectionBase<ELF32LE> *);
 template void elf::reportDiscarded<ELF32BE>(InputSectionBase<ELF32BE> *);

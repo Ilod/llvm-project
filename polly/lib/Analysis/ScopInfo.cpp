@@ -2798,8 +2798,11 @@ bool Scop::addLoopBoundsToHeaderDomain(Loop *L, LoopInfo &LI) {
       SmallVector<isl_set *, 8> ConditionSets;
       int idx = BI->getSuccessor(0) != HeaderBB;
       if (!buildConditionSets(*getStmtFor(LatchBB), TI, L, LatchBBDom,
-                              ConditionSets))
+                              ConditionSets)) {
+        isl_map_free(NextIterationMap);
+        isl_set_free(UnionBackedgeCondition);
         return false;
+      }
 
       // Free the non back edge condition set as we do not need it.
       isl_set_free(ConditionSets[1 - idx]);
@@ -4150,6 +4153,14 @@ void Scop::addScopStmt(BasicBlock *BB, Region *R) {
 ScopStmt *Scop::addScopStmt(__isl_take isl_map *SourceRel,
                             __isl_take isl_map *TargetRel,
                             __isl_take isl_set *Domain) {
+  isl_set *SourceDomain = isl_map_domain(isl_map_copy(SourceRel));
+  isl_set *TargetDomain = isl_map_domain(isl_map_copy(TargetRel));
+  assert(isl_set_is_subset(Domain, TargetDomain) &&
+         "Target access not defined for complete statement domain");
+  assert(isl_set_is_subset(Domain, SourceDomain) &&
+         "Source access not defined for complete statement domain");
+  isl_set_free(SourceDomain);
+  isl_set_free(TargetDomain);
   Stmts.emplace_back(*this, SourceRel, TargetRel, Domain);
   CopyStmtsNum++;
   return &(Stmts.back());
