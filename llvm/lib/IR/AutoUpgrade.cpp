@@ -244,6 +244,8 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
          Name == "sse2.pminu.b" ||
          Name == "sse41.pminuw" ||
          Name == "sse41.pminud" ||
+         Name == "avx512.mask.pshuf.b.128" ||
+         Name == "avx512.mask.pshuf.b.256" ||
          Name.startswith("avx2.pmax") ||
          Name.startswith("avx2.pmin") ||
          Name.startswith("avx512.mask.pmax") ||
@@ -1355,25 +1357,30 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       Rep = Builder.CreateFAdd(CI->getArgOperand(0), CI->getArgOperand(1));
       Rep = EmitX86Select(Builder, CI->getArgOperand(3), Rep,
                           CI->getArgOperand(2));
-    } else if (IsX86 && (Name == "avx512.mask.div.pd.128" ||
-                         Name == "avx512.mask.div.pd.256" ||
-                         Name == "avx512.mask.div.ps.128" ||
-                         Name == "avx512.mask.div.ps.256")) {
+    } else if (IsX86 && Name.startswith("avx512.mask.div.p")) {
       Rep = Builder.CreateFDiv(CI->getArgOperand(0), CI->getArgOperand(1));
       Rep = EmitX86Select(Builder, CI->getArgOperand(3), Rep,
                           CI->getArgOperand(2));
-    } else if (IsX86 && (Name == "avx512.mask.mul.pd.128" ||
-                         Name == "avx512.mask.mul.pd.256" ||
-                         Name == "avx512.mask.mul.ps.128" ||
-                         Name == "avx512.mask.mul.ps.256")) {
+    } else if (IsX86 && Name.startswith("avx512.mask.mul.p")) {
       Rep = Builder.CreateFMul(CI->getArgOperand(0), CI->getArgOperand(1));
       Rep = EmitX86Select(Builder, CI->getArgOperand(3), Rep,
                           CI->getArgOperand(2));
-    } else if (IsX86 && (Name == "avx512.mask.sub.pd.128" ||
-                         Name == "avx512.mask.sub.pd.256" ||
-                         Name == "avx512.mask.sub.ps.128" ||
-                         Name == "avx512.mask.sub.ps.256")) {
+    } else if (IsX86 && Name.startswith("avx512.mask.sub.p")) {
       Rep = Builder.CreateFSub(CI->getArgOperand(0), CI->getArgOperand(1));
+      Rep = EmitX86Select(Builder, CI->getArgOperand(3), Rep,
+                          CI->getArgOperand(2));
+    } else if (IsX86 && Name.startswith("avx512.mask.pshuf.b.")) {
+      VectorType *VecTy = cast<VectorType>(CI->getType());
+      Intrinsic::ID IID;
+      if (VecTy->getPrimitiveSizeInBits() == 128)
+        IID = Intrinsic::x86_ssse3_pshuf_b_128;
+      else if (VecTy->getPrimitiveSizeInBits() == 256)
+        IID = Intrinsic::x86_avx2_pshuf_b;
+      else
+        llvm_unreachable("Unexpected intrinsic");
+
+      Rep = Builder.CreateCall(Intrinsic::getDeclaration(F->getParent(), IID),
+                               { CI->getArgOperand(0), CI->getArgOperand(1) });
       Rep = EmitX86Select(Builder, CI->getArgOperand(3), Rep,
                           CI->getArgOperand(2));
     } else if (IsX86 && Name == "avx512.mask.psll.d.128") {
