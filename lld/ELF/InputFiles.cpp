@@ -171,9 +171,8 @@ template <class ELFT> uint32_t elf::ObjectFile<ELFT>::getMipsGp0() const {
 template <class ELFT>
 void elf::ObjectFile<ELFT>::parse(DenseSet<CachedHashStringRef> &ComdatGroups) {
   // Read section and symbol tables.
-  ArrayRef<Elf_Shdr> ObjSections = check(this->getObj().sections());
-  initializeSections(ComdatGroups, ObjSections);
-  initializeSymbols(ObjSections);
+  initializeSections(ComdatGroups);
+  initializeSymbols();
 }
 
 // Sections with SHT_GROUP and comdat bits define comdat section groups.
@@ -257,8 +256,8 @@ bool elf::ObjectFile<ELFT>::shouldMerge(const Elf_Shdr &Sec) {
 
 template <class ELFT>
 void elf::ObjectFile<ELFT>::initializeSections(
-    DenseSet<CachedHashStringRef> &ComdatGroups,
-    ArrayRef<Elf_Shdr> ObjSections) {
+    DenseSet<CachedHashStringRef> &ComdatGroups) {
+  ArrayRef<Elf_Shdr> ObjSections = check(this->getObj().sections());
   const ELFFile<ELFT> &Obj = this->getObj();
   uint64_t Size = ObjSections.size();
   Sections.resize(Size);
@@ -422,8 +421,7 @@ elf::ObjectFile<ELFT>::createInputSection(const Elf_Shdr &Sec,
   return make<InputSection<ELFT>>(this, &Sec, Name);
 }
 
-template <class ELFT>
-void elf::ObjectFile<ELFT>::initializeSymbols(ArrayRef<Elf_Shdr> Sections) {
+template <class ELFT> void elf::ObjectFile<ELFT>::initializeSymbols() {
   SymbolBodies.reserve(this->Symbols.size());
   for (const Elf_Sym &Sym : this->Symbols)
     SymbolBodies.push_back(createSymbolBody(&Sym));
@@ -820,7 +818,7 @@ template <class ELFT> void BinaryFile::parse() {
   StringRef SizeName = Saver.save(Twine(Filename) + "_size");
 
   auto *Section =
-      new InputSection<ELFT>(SHF_ALLOC, SHT_PROGBITS, 8, Data, ".data");
+      make<InputSection<ELFT>>(SHF_ALLOC, SHT_PROGBITS, 8, Data, ".data");
   Sections.push_back(Section);
 
   elf::Symtab<ELFT>::X->addRegular(StartName, STV_DEFAULT, Section, STB_GLOBAL,
@@ -839,7 +837,7 @@ static bool isBitcode(MemoryBufferRef MB) {
 InputFile *elf::createObjectFile(MemoryBufferRef MB, StringRef ArchiveName,
                                  uint64_t OffsetInArchive) {
   InputFile *F =
-      isBitcode(MB) ? new BitcodeFile(MB) : createELFFile<ObjectFile>(MB);
+      isBitcode(MB) ? make<BitcodeFile>(MB) : createELFFile<ObjectFile>(MB);
   F->ArchiveName = ArchiveName;
   F->OffsetInArchive = OffsetInArchive;
   return F;

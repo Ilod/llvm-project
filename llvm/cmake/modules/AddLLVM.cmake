@@ -593,6 +593,7 @@ macro(add_llvm_library name)
       if(${name} IN_LIST LLVM_DISTRIBUTION_COMPONENTS OR
           NOT LLVM_DISTRIBUTION_COMPONENTS)
         set(export_to_llvmexports EXPORT LLVMExports)
+        set_property(GLOBAL PROPERTY LLVM_HAS_EXPORTS True)
       endif()
 
       install(TARGETS ${name}
@@ -633,6 +634,7 @@ macro(add_llvm_loadable_module name)
         if(${name} IN_LIST LLVM_DISTRIBUTION_COMPONENTS OR
             NOT LLVM_DISTRIBUTION_COMPONENTS)
           set(export_to_llvmexports EXPORT LLVMExports)
+          set_property(GLOBAL PROPERTY LLVM_HAS_EXPORTS True)
         endif()
 
         install(TARGETS ${name}
@@ -817,6 +819,7 @@ macro(add_llvm_tool name)
       if(${name} IN_LIST LLVM_DISTRIBUTION_COMPONENTS OR
           NOT LLVM_DISTRIBUTION_COMPONENTS)
         set(export_to_llvmexports EXPORT LLVMExports)
+        set_property(GLOBAL PROPERTY LLVM_HAS_EXPORTS True)
         set_target_properties(${name} PROPERTIES LLVM_INSTALL_TOOL 1)
       endif()
 

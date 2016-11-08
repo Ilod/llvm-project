@@ -118,8 +118,7 @@ StringRef elf::getOutputSectionName(StringRef Name) {
 }
 
 template <class ELFT> void elf::reportDiscarded(InputSectionBase<ELFT> *IS) {
-  if (!Config->PrintGcSections || !IS || IS == &InputSection<ELFT>::Discarded ||
-      IS->Live)
+  if (!Config->PrintGcSections)
     return;
   errs() << "removing unused section from '" << IS->Name << "' in file '"
          << IS->getFile()->getName() << "'\n";
@@ -228,7 +227,7 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
   Out<ELFT>::ProgramHeaders->updateAlignment(sizeof(uintX_t));
 
   if (needsInterpSection<ELFT>()) {
-    In<ELFT>::Interp = make<InterpSection<ELFT>>();
+    In<ELFT>::Interp = createInterpSection<ELFT>();
     Symtab<ELFT>::X->Sections.push_back(In<ELFT>::Interp);
   } else {
     In<ELFT>::Interp = nullptr;
@@ -287,7 +286,7 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
   if (In<ELFT>::BuildId)
     Symtab<ELFT>::X->Sections.push_back(In<ELFT>::BuildId);
 
-  CommonSection<ELFT> *Common = make<CommonSection<ELFT>>();
+  InputSection<ELFT> *Common = createCommonSection<ELFT>();
   if (!Common->Data.empty()) {
     In<ELFT>::Common = Common;
     Symtab<ELFT>::X->Sections.push_back(Common);
@@ -512,10 +511,6 @@ static bool compareSections(const OutputSectionBase<ELFT> *A,
   return compareSectionsNonScript(A, B);
 }
 
-template <class ELFT> static bool isDiscarded(InputSectionBase<ELFT> *S) {
-  return !S || S == &InputSection<ELFT>::Discarded || !S->Live;
-}
-
 // Program header entry
 template <class ELFT>
 PhdrEntry<ELFT>::PhdrEntry(unsigned Type, unsigned Flags) {
@@ -653,7 +648,7 @@ void Writer<ELFT>::forEachRelSec(
     std::function<void(InputSectionBase<ELFT> &, const typename ELFT::Shdr &)>
         Fn) {
   for (InputSectionBase<ELFT> *IS : Symtab<ELFT>::X->Sections) {
-    if (isDiscarded(IS))
+    if (!IS->Live)
       continue;
     // Scan all relocations. Each relocation goes through a series
     // of tests to determine if it needs special treatment, such as
@@ -675,7 +670,7 @@ void Writer<ELFT>::forEachRelSec(
 
 template <class ELFT>
 void Writer<ELFT>::addInputSec(InputSectionBase<ELFT> *IS) {
-  if (isDiscarded(IS)) {
+  if (!IS->Live) {
     reportDiscarded(IS);
     return;
   }
@@ -699,6 +694,22 @@ template <class ELFT> void Writer<ELFT>::createSections() {
 
   for (OutputSectionBase<ELFT> *Sec : OutputSections)
     Sec->assignOffsets();
+}
+
+template <class ELFT>
+static bool canSharePtLoad(const OutputSectionBase<ELFT> &S1,
+                           const OutputSectionBase<ELFT> &S2) {
+  if (!(S1.getFlags() & SHF_ALLOC) || !(S2.getFlags() & SHF_ALLOC))
+    return false;
+
+  bool S1IsWrite = S1.getFlags() & SHF_WRITE;
+  bool S2IsWrite = S2.getFlags() & SHF_WRITE;
+  if (S1IsWrite != S2IsWrite)
+    return false;
+
+  if (!S1IsWrite)
+    return true; // RO and RX share a PT_LOAD with linker scripts.
+  return (S1.getFlags() & SHF_EXECINSTR) == (S2.getFlags() & SHF_EXECINSTR);
 }
 
 template <class ELFT> void Writer<ELFT>::sortSections() {
@@ -729,25 +740,46 @@ template <class ELFT> void Writer<ELFT>::sortSections() {
   // The way we define an order then is:
   // *  First put script sections at the start and sort the script and
   //    non-script sections independently.
-  // *  Move each non-script section to the first position where it
-  //    compareSectionsNonScript less than the successor.
+  // *  Move each non-script section to its preferred position. We try
+  //    to put each section in the last position where it it can share
+  //    a PT_LOAD.
 
   std::stable_sort(OutputSections.begin(), OutputSections.end(),
                    compareSections<ELFT>);
 
   auto I = OutputSections.begin();
   auto E = OutputSections.end();
-  auto NonScriptI = std::find_if(I, E, [](OutputSectionBase<ELFT> *S) {
-    return Script<ELFT>::X->getSectionIndex(S->getName()) == INT_MAX;
-  });
+  auto NonScriptI =
+      std::find_if(OutputSections.begin(), E, [](OutputSectionBase<ELFT> *S) {
+        return Script<ELFT>::X->getSectionIndex(S->getName()) == INT_MAX;
+      });
   while (NonScriptI != E) {
-    auto FirstGreater =
-        std::find_if(I, NonScriptI, [&](OutputSectionBase<ELFT> *S) {
-          return compareSectionsNonScript<ELFT>(*NonScriptI, S);
+    auto BestPos =
+        std::max_element(I, NonScriptI, [&](OutputSectionBase<ELFT> *&A,
+                                            OutputSectionBase<ELFT> *&B) {
+          bool ACanSharePtLoad = canSharePtLoad(**NonScriptI, *A);
+          bool BCanSharePtLoad = canSharePtLoad(**NonScriptI, *B);
+          if (ACanSharePtLoad != BCanSharePtLoad)
+            return BCanSharePtLoad;
+
+          bool ACmp = compareSectionsNonScript<ELFT>(*NonScriptI, A);
+          bool BCmp = compareSectionsNonScript<ELFT>(*NonScriptI, B);
+          if (ACmp != BCmp)
+            return BCmp; // FIXME: missing test
+
+          size_t PosA = &A - &OutputSections[0];
+          size_t PosB = &B - &OutputSections[0];
+          return ACmp ? PosA > PosB : PosA < PosB;
         });
-    std::rotate(FirstGreater, NonScriptI, NonScriptI + 1);
+
+    // max_element only returns NonScriptI if the range is empty. If the range
+    // is not empty we should consider moving the the element forward one
+    // position.
+    if (BestPos != NonScriptI &&
+        !compareSectionsNonScript<ELFT>(*NonScriptI, *BestPos))
+      ++BestPos;
+    std::rotate(BestPos, NonScriptI, NonScriptI + 1);
     ++NonScriptI;
-    ++I;
   }
 }
 
