@@ -81,15 +81,15 @@
 # CHECKEXE-NEXT:    Version: 1
 # CHECKEXE-NEXT:    Entry: 0x11000
 # CHECKEXE-NEXT:    ProgramHeaderOffset: 0x40
-# CHECKEXE-NEXT:    SectionHeaderOffset: 0x11E8
+# CHECKEXE-NEXT:    SectionHeaderOffset: 0x11F8
 # CHECKEXE-NEXT:    Flags [
 # CHECKEXE-NEXT:    ]
 # CHECKEXE-NEXT:    HeaderSize: 64
 # CHECKEXE-NEXT:    ProgramHeaderEntrySize: 56
 # CHECKEXE-NEXT:    ProgramHeaderCount: 5
 # CHECKEXE-NEXT:    SectionHeaderEntrySize: 64
-# CHECKEXE-NEXT:    SectionHeaderCount: 6
-# CHECKEXE-NEXT:    StringTableSectionIndex: 4
+# CHECKEXE-NEXT:    SectionHeaderCount: 7
+# CHECKEXE-NEXT:    StringTableSectionIndex: 5
 # CHECKEXE-NEXT:  }
 
 .text

@@ -425,8 +425,6 @@ u64 NanoTime() {
 }
 
 void Abort() {
-  if (::IsDebuggerPresent())
-    __debugbreak();
   internal__exit(3);
 }
 
@@ -657,7 +655,11 @@ uptr internal_sched_yield() {
 
 void internal__exit(int exitcode) {
   // ExitProcess runs some finalizers, so use TerminateProcess to avoid that.
-  TerminateProcess(GetCurrentProcess(), 3);
+  // The debugger doesn't stop on TerminateProcess like it does on ExitProcess,
+  // so add our own breakpoint here.
+  if (::IsDebuggerPresent())
+    __debugbreak();
+  TerminateProcess(GetCurrentProcess(), exitcode);
 }
 
 uptr internal_ftruncate(fd_t fd, uptr size) {

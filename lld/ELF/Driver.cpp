@@ -24,6 +24,7 @@
 #include "lld/Driver/Driver.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdlib>
@@ -102,7 +103,7 @@ LinkerDriver::getArchiveMembers(MemoryBufferRef MB) {
       check(Archive::create(MB), "failed to parse archive");
 
   std::vector<MemoryBufferRef> V;
-  Error Err;
+  Error Err = Error::success();
   for (const ErrorOr<Archive::Child> &COrErr : File->children(Err)) {
     Archive::Child C = check(COrErr, "could not get the child of the archive " +
                                          File->getFileName());
@@ -113,7 +114,7 @@ LinkerDriver::getArchiveMembers(MemoryBufferRef MB) {
     V.push_back(MBRef);
   }
   if (Err)
-    Error(Err);
+    fatal("Archive::children failed: " + toString(std::move(Err)));
 
   // Take ownership of memory buffers created for members of thin archives.
   for (std::unique_ptr<MemoryBuffer> &MB : File->takeThinBuffers())
@@ -201,12 +202,6 @@ static void initLLVM(opt::InputArgList &Args) {
   InitializeAllTargetMCs();
   InitializeAllAsmPrinters();
   InitializeAllAsmParsers();
-
-  // This is a flag to discard all but GlobalValue names.
-  // We want to enable it by default because it saves memory.
-  // Disable it only when a developer option (-save-temps) is given.
-  Driver->Context.setDiscardValueNames(!Config->SaveTemps);
-  Driver->Context.enableDebugTypeODRUniquing();
 
   // Parse and evaluate -mllvm options.
   std::vector<const char *> V;
@@ -447,6 +442,18 @@ static SortSectionPolicy getSortKind(opt::InputArgList &Args) {
   return SortSectionPolicy::Default;
 }
 
+// Parse the --symbol-ordering-file argument. File has form:
+// symbolName1
+// [...]
+// symbolNameN
+static void parseSymbolOrderingList(MemoryBufferRef MB) {
+  unsigned I = 0;
+  SmallVector<StringRef, 0> Arr;
+  MB.getBuffer().split(Arr, '\n');
+  for (StringRef S : Arr)
+    Config->SymbolOrderingFile.insert({CachedHashStringRef(S.trim()), I++});
+}
+
 // Initializes Config members by the command line options.
 void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   for (auto *Arg : Args.filtered(OPT_L))
@@ -579,6 +586,10 @@ void LinkerDriver::readConfigs(opt::InputArgList &Args) {
   if (auto *Arg = Args.getLastArg(OPT_dynamic_list))
     if (Optional<MemoryBufferRef> Buffer = readFile(Arg->getValue()))
       parseDynamicList(*Buffer);
+
+  if (auto *Arg = Args.getLastArg(OPT_symbol_ordering_file))
+    if (Optional<MemoryBufferRef> Buffer = readFile(Arg->getValue()))
+      parseSymbolOrderingList(*Buffer);
 
   for (auto *Arg : Args.filtered(OPT_export_dynamic_symbol))
     Config->DynamicList.push_back(Arg->getValue());
