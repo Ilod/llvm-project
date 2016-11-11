@@ -313,6 +313,26 @@ public:
 
   std::string Path;
 };
+
+class TemporaryFileMemoryBuffer : public MemoryBuffer {
+  TemporaryFile File;
+  std::unique_ptr<MemoryBuffer> Buffer;
+public:
+  TemporaryFileMemoryBuffer(TemporaryFile&& file)
+    : MemoryBuffer() , File(std::move(file)) , Buffer(File.getMemoryBuffer())
+  {
+    init(Buffer->getBufferStart(), Buffer->getBufferEnd(), false);
+  }
+  /// Return an identifier for this buffer, typically the filename it was read
+  /// from.
+  virtual StringRef getBufferIdentifier() const override { return Buffer->getBufferIdentifier(); }
+
+  /// Return information on the memory mechanism used to support the
+  /// MemoryBuffer.
+  virtual BufferKind getBufferKind() const { return Buffer->getBufferKind(); };
+
+  MemoryBufferRef getMemBufferRef() const { return Buffer->getMemBufferRef(); }
+};
 }
 
 // Create the default manifest file as a temporary file.
@@ -413,7 +433,7 @@ std::unique_ptr<MemoryBuffer> createManifestRes() {
   E.add("/nologo");
   E.add(RCFile.Path);
   E.run();
-  return ResFile.getMemoryBuffer();
+  return llvm::make_unique<TemporaryFileMemoryBuffer>(std::move(ResFile));
 }
 
 void createSideBySideManifest() {
