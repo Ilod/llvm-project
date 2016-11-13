@@ -59,11 +59,10 @@ if (WIN32)
 
   set(LIB_PATH_VERSION)
   set(REG_KEY)
-
-  install(DIRECTORY .
-    DESTINATION tools/msbuild
-    FILES_MATCHING
-    PATTERN "*.bat"
-    PATTERN ".svn" EXCLUDE
-    )
+  
+  configure_file("install.bat.in" "install.bat")
+  configure_file("uninstall.bat.in" "uninstall.bat")
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/install.bat" DESTINATION tools/msbuild)
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/uninstall.bat" DESTINATION tools/msbuild)
+  
 endif()
