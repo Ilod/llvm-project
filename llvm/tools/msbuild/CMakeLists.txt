@@ -57,14 +57,15 @@ if (WIN32)
     install(FILES "toolset-vs2014.targets" DESTINATION "tools/msbuild/${platform}")
     install(FILES "toolset-vs2014_xp.targets" DESTINATION "tools/msbuild/${platform}")
   endforeach()
-
-  set(LIB_PATH_VERSION)
-  set(TOOLSET_PREFIX)
-  set(REG_KEY)
   
   configure_file("install.bat.in" "install.bat")
   configure_file("uninstall.bat.in" "uninstall.bat")
+  
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/install.bat" DESTINATION tools/msbuild)
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/uninstall.bat" DESTINATION tools/msbuild)
+  
+  set(LIB_PATH_VERSION)
+  set(TOOLSET_PREFIX)
+  set(REG_KEY)
   
 endif()
