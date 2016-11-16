@@ -1,6 +1,7 @@
 if (WIN32)
   # CPack will install a registry key in this format that we wish to reference.
   set(REG_KEY "${CPACK_PACKAGE_INSTALL_REGISTRY_KEY}")
+  set(REG_VENDOR_KEY "${CPACK_PACKAGE_VENDOR}")
   set(TOOLSET_PREFIX "${LLVM_INSTALL_NAME}")
   set(LIB_PATH_VERSION "${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}")
 
@@ -66,6 +67,7 @@ if (WIN32)
   
   set(LIB_PATH_VERSION)
   set(TOOLSET_PREFIX)
+  set(REG_VENDOR_KEY)
   set(REG_KEY)
   
 endif()
