@@ -1,5 +1,4 @@
-//===-- OptionValueProperties.cpp ---------------------------------*- C++
-//-*-===//
+//===-- OptionValueProperties.cpp --------------------------------*- C++-*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -59,8 +58,7 @@ void OptionValueProperties::Initialize(const PropertyDefinition *defs) {
   for (size_t i = 0; defs[i].name; ++i) {
     Property property(defs[i]);
     assert(property.IsValid());
-    m_name_to_index.Append(property.GetName().GetStringRef(),
-                           m_properties.size());
+    m_name_to_index.Append(property.GetName(), m_properties.size());
     property.GetValue()->SetParent(shared_from_this());
     m_properties.push_back(property);
   }
@@ -215,21 +213,6 @@ Error OptionValueProperties::SetSubValue(const ExecutionContext *exe_ctx,
       error.SetErrorStringWithFormat("invalid value path '%s'", name);
   }
   return error;
-}
-
-ConstString OptionValueProperties::GetPropertyNameAtIndex(uint32_t idx) const {
-  const Property *property = GetPropertyAtIndex(nullptr, false, idx);
-  if (property)
-    return property->GetName();
-  return ConstString();
-}
-
-const char *
-OptionValueProperties::GetPropertyDescriptionAtIndex(uint32_t idx) const {
-  const Property *property = GetPropertyAtIndex(nullptr, false, idx);
-  if (property)
-    return property->GetDescription();
-  return nullptr;
 }
 
 uint32_t
@@ -641,8 +624,7 @@ void OptionValueProperties::DumpAllDescriptions(CommandInterpreter &interpreter,
   for (size_t i = 0; i < num_properties; ++i) {
     const Property *property = ProtectedGetPropertyAtIndex(i);
     if (property)
-      max_name_len =
-          std::max<size_t>(property->GetName().GetLength(), max_name_len);
+      max_name_len = std::max<size_t>(property->GetName().size(), max_name_len);
   }
   for (size_t i = 0; i < num_properties; ++i) {
     const Property *property = ProtectedGetPropertyAtIndex(i);
@@ -652,7 +634,7 @@ void OptionValueProperties::DumpAllDescriptions(CommandInterpreter &interpreter,
 }
 
 void OptionValueProperties::Apropos(
-    const char *keyword,
+    llvm::StringRef keyword,
     std::vector<const Property *> &matching_properties) const {
   const size_t num_properties = m_properties.size();
   StreamString strm;
@@ -665,12 +647,12 @@ void OptionValueProperties::Apropos(
         properties->Apropos(keyword, matching_properties);
       } else {
         bool match = false;
-        const char *name = property->GetName().GetCString();
-        if (name && ::strcasestr(name, keyword))
+        llvm::StringRef name = property->GetName();
+        if (name.contains_lower(keyword))
           match = true;
         else {
-          const char *desc = property->GetDescription();
-          if (desc && ::strcasestr(desc, keyword))
+          llvm::StringRef desc = property->GetDescription();
+          if (desc.contains_lower(keyword))
             match = true;
         }
         if (match) {

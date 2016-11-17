@@ -62,7 +62,7 @@ public:
   virtual void DumpAllDescriptions(CommandInterpreter &interpreter,
                                    Stream &strm) const;
 
-  void Apropos(const char *keyword,
+  void Apropos(llvm::StringRef keyword,
                std::vector<const Property *> &matching_properties) const;
 
   void Initialize(const PropertyDefinition *setting_definitions);
@@ -75,10 +75,6 @@ public:
   //---------------------------------------------------------------------
 
   virtual size_t GetNumProperties() const;
-
-  virtual ConstString GetPropertyNameAtIndex(uint32_t idx) const;
-
-  virtual const char *GetPropertyDescriptionAtIndex(uint32_t idx) const;
 
   //---------------------------------------------------------------------
   // Get the index of a property given its exact name in this property
