@@ -629,7 +629,7 @@ lldb::ProcessSP PlatformPOSIX::Attach(ProcessAttachInfo &attach_info,
     if (target == NULL) {
       TargetSP new_target_sp;
 
-      error = debugger.GetTargetList().CreateTarget(debugger, NULL, NULL, false,
+      error = debugger.GetTargetList().CreateTarget(debugger, "", "", false,
                                                     NULL, new_target_sp);
       target = new_target_sp.get();
       if (log)
@@ -836,8 +836,8 @@ Error PlatformPOSIX::UnloadImage(lldb_private::Process *process,
   return Error();
 }
 
-lldb::ProcessSP PlatformPOSIX::ConnectProcess(const char *connect_url,
-                                              const char *plugin_name,
+lldb::ProcessSP PlatformPOSIX::ConnectProcess(llvm::StringRef connect_url,
+                                              llvm::StringRef plugin_name,
                                               lldb_private::Debugger &debugger,
                                               lldb_private::Target *target,
                                               lldb_private::Error &error) {

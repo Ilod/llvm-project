@@ -212,7 +212,7 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
   In<ELFT>::DynStrTab = make<StringTableSection<ELFT>>(".dynstr", true);
   In<ELFT>::Dynamic = make<DynamicSection<ELFT>>();
   Out<ELFT>::EhFrame = make<EhOutputSection<ELFT>>();
-  Out<ELFT>::Plt = make<PltSection<ELFT>>();
+  In<ELFT>::Plt = make<PltSection<ELFT>>();
   In<ELFT>::RelaDyn = make<RelocationSection<ELFT>>(
       Config->Rela ? ".rela.dyn" : ".rel.dyn", Config->ZCombreloc);
   In<ELFT>::ShStrTab = make<StringTableSection<ELFT>>(".shstrtab", false);
@@ -232,16 +232,16 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
   }
 
   if (!Symtab<ELFT>::X->getSharedFiles().empty() || Config->Pic) {
-    Out<ELFT>::DynSymTab = make<SymbolTableSection<ELFT>>(*In<ELFT>::DynStrTab);
+    In<ELFT>::DynSymTab = make<SymbolTableSection<ELFT>>(*In<ELFT>::DynStrTab);
   }
 
   if (Config->EhFrameHdr)
     Out<ELFT>::EhFrameHdr = make<EhFrameHeader<ELFT>>();
 
   if (Config->GnuHash)
-    Out<ELFT>::GnuHashTab = make<GnuHashTableSection<ELFT>>();
+    In<ELFT>::GnuHashTab = make<GnuHashTableSection<ELFT>>();
   if (Config->SysvHash)
-    Out<ELFT>::HashTab = make<HashTableSection<ELFT>>();
+    In<ELFT>::HashTab = make<HashTableSection<ELFT>>();
   if (Config->GdbIndex)
     Out<ELFT>::GdbIndex = make<GdbIndexSection<ELFT>>();
 
@@ -249,7 +249,7 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
       Config->Rela ? ".rela.plt" : ".rel.plt", false /*Sort*/);
   if (Config->Strip != StripPolicy::All) {
     In<ELFT>::StrTab = make<StringTableSection<ELFT>>(".strtab", false);
-    Out<ELFT>::SymTab = make<SymbolTableSection<ELFT>>(*In<ELFT>::StrTab);
+    In<ELFT>::SymTab = make<SymbolTableSection<ELFT>>(*In<ELFT>::StrTab);
   }
 
   if (Config->EMachine == EM_MIPS && !Config->Shared) {
@@ -372,7 +372,7 @@ template <class ELFT> static bool includeInSymtab(const SymbolBody &B) {
 // Local symbols are not in the linker's symbol table. This function scans
 // each object file's symbol table to copy local symbols to the output.
 template <class ELFT> void Writer<ELFT>::copyLocalSymbols() {
-  if (!Out<ELFT>::SymTab)
+  if (!In<ELFT>::SymTab)
     return;
   for (elf::ObjectFile<ELFT> *F : Symtab<ELFT>::X->getObjectFiles()) {
     StringRef StrTab = F->getStringTable();
@@ -392,11 +392,11 @@ template <class ELFT> void Writer<ELFT>::copyLocalSymbols() {
       InputSectionBase<ELFT> *Sec = DR->Section;
       if (!shouldKeepInSymtab<ELFT>(Sec, SymName, *B))
         continue;
-      ++Out<ELFT>::SymTab->NumLocals;
+      ++In<ELFT>::SymTab->NumLocals;
       if (Config->Relocatable)
-        B->DynsymIndex = Out<ELFT>::SymTab->NumLocals;
+        B->DynsymIndex = In<ELFT>::SymTab->NumLocals;
       F->KeptLocalSyms.push_back(
-          std::make_pair(DR, Out<ELFT>::SymTab->StrTabSec.addString(SymName)));
+          std::make_pair(DR, In<ELFT>::SymTab->StrTabSec.addString(SymName)));
     }
   }
 }
@@ -569,11 +569,12 @@ template <class ELFT>
 static Symbol *addRegular(StringRef Name, InputSectionBase<ELFT> *IS,
                           typename ELFT::uint Value) {
   typename ELFT::Sym LocalHidden = {};
-  LocalHidden.setBindingAndType(STB_LOCAL, STT_NOTYPE);
+  // The linker generated symbols are added as STB_WEAK to allow user defined
+  // ones to override them.
+  LocalHidden.setBindingAndType(STB_WEAK, STT_NOTYPE);
   LocalHidden.setVisibility(STV_HIDDEN);
-  Symbol *S = Symtab<ELFT>::X->addRegular(Name, LocalHidden, IS, nullptr);
-  cast<DefinedRegular<ELFT>>(S->body())->Value = Value;
-  return S;
+  LocalHidden.st_value = Value;
+  return Symtab<ELFT>::X->addRegular(Name, LocalHidden, IS, nullptr);
 }
 
 template <class ELFT>
@@ -594,7 +595,7 @@ static Symbol *addOptionalRegular(StringRef Name, InputSectionBase<ELFT> *IS,
 // need these symbols, since IRELATIVE relocs are resolved through GOT
 // and PLT. For details, see http://www.airs.com/blog/archives/403.
 template <class ELFT> void Writer<ELFT>::addRelIpltSymbols() {
-  if (Out<ELFT>::DynSymTab)
+  if (In<ELFT>::DynSymTab)
     return;
   StringRef S = Config->Rela ? "__rela_iplt_start" : "__rel_iplt_start";
   addOptionalRegular<ELFT>(S, In<ELFT>::RelaPlt, 0);
@@ -647,7 +648,7 @@ template <class ELFT> void Writer<ELFT>::addReservedSymbols() {
   // to avoid the undefined symbol error. As usual special cases are ARM and
   // MIPS - the libc for these targets defines __tls_get_addr itself because
   // there are no TLS optimizations for these targets.
-  if (!Out<ELFT>::DynSymTab &&
+  if (!In<ELFT>::DynSymTab &&
       (Config->EMachine != EM_MIPS && Config->EMachine != EM_ARM))
     Symtab<ELFT>::X->addIgnored("__tls_get_addr");
 
@@ -893,7 +894,7 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
   // It should be okay as no one seems to care about the type.
   // Even the author of gold doesn't remember why gold behaves that way.
   // https://sourceware.org/ml/binutils/2002-03/msg00360.html
-  if (Out<ELFT>::DynSymTab)
+  if (In<ELFT>::DynSymTab)
     addRegular("_DYNAMIC", In<ELFT>::Dynamic, 0);
 
   // Define __rel[a]_iplt_{start,end} symbols if needed.
@@ -915,11 +916,11 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
 
     if (!includeInSymtab<ELFT>(*Body))
       continue;
-    if (Out<ELFT>::SymTab)
-      Out<ELFT>::SymTab->addSymbol(Body);
+    if (In<ELFT>::SymTab)
+      In<ELFT>::SymTab->addSymbol(Body);
 
-    if (Out<ELFT>::DynSymTab && S->includeInDynsym()) {
-      Out<ELFT>::DynSymTab->addSymbol(Body);
+    if (In<ELFT>::DynSymTab && S->includeInDynsym()) {
+      In<ELFT>::DynSymTab->addSymbol(Body);
       if (auto *SS = dyn_cast<SharedSymbol<ELFT>>(Body))
         if (SS->file()->isNeeded())
           Out<ELFT>::VerNeed->addSymbol(SS);
@@ -942,27 +943,19 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
     Sec->ShName = In<ELFT>::ShStrTab->addString(Sec->getName());
   }
 
-  // Finalizers fix each section's size.
-  // .dynsym is finalized early since that may fill up .gnu.hash.
-  if (Out<ELFT>::DynSymTab)
-    Out<ELFT>::DynSymTab->finalize();
-
   // Fill other section headers. The dynamic table is finalized
   // at the end because some tags like RELSZ depend on result
   // of finalizing other sections.
   for (OutputSectionBase *Sec : OutputSections)
     Sec->finalize();
 
-  // Dynamic section must be the last one in this list.
+  // Dynamic section must be the last one in this list and dynamic
+  // symbol table section (DynSymTab) must be the first one.
   finalizeSynthetic<ELFT>(
-      {In<ELFT>::ShStrTab, In<ELFT>::StrTab, In<ELFT>::DynStrTab, In<ELFT>::Got,
-       In<ELFT>::MipsGot, In<ELFT>::GotPlt, In<ELFT>::RelaDyn,
-       In<ELFT>::RelaPlt, In<ELFT>::Dynamic});
-
-  // Now that all output offsets are fixed. Finalize mergeable sections
-  // to fix their maps from input offsets to output offsets.
-  for (OutputSectionBase *Sec : OutputSections)
-    Sec->finalizePieces();
+      {In<ELFT>::DynSymTab, In<ELFT>::GnuHashTab, In<ELFT>::HashTab,
+       In<ELFT>::SymTab, In<ELFT>::ShStrTab, In<ELFT>::StrTab,
+       In<ELFT>::DynStrTab, In<ELFT>::Got, In<ELFT>::MipsGot, In<ELFT>::GotPlt,
+       In<ELFT>::RelaDyn, In<ELFT>::RelaPlt, In<ELFT>::Plt, In<ELFT>::Dynamic});
 }
 
 template <class ELFT> bool Writer<ELFT>::needsGot() {
@@ -990,11 +983,11 @@ template <class ELFT> void Writer<ELFT>::addPredefinedSections() {
   // because we sort the sections using their attributes below.
   if (Out<ELFT>::GdbIndex && Out<ELFT>::DebugInfo)
     Add(Out<ELFT>::GdbIndex);
-  Add(Out<ELFT>::SymTab);
+  addInputSec(In<ELFT>::SymTab);
   addInputSec(In<ELFT>::ShStrTab);
   addInputSec(In<ELFT>::StrTab);
-  if (Out<ELFT>::DynSymTab) {
-    Add(Out<ELFT>::DynSymTab);
+  if (In<ELFT>::DynSymTab) {
+    addInputSec(In<ELFT>::DynSymTab);
 
     bool HasVerNeed = Out<ELFT>::VerNeed->getNeedNum() != 0;
     if (Out<ELFT>::VerDef || HasVerNeed)
@@ -1003,8 +996,8 @@ template <class ELFT> void Writer<ELFT>::addPredefinedSections() {
     if (HasVerNeed)
       Add(Out<ELFT>::VerNeed);
 
-    Add(Out<ELFT>::GnuHashTab);
-    Add(Out<ELFT>::HashTab);
+    addInputSec(In<ELFT>::GnuHashTab);
+    addInputSec(In<ELFT>::HashTab);
     addInputSec(In<ELFT>::Dynamic);
     addInputSec(In<ELFT>::DynStrTab);
     if (In<ELFT>::RelaDyn->hasRelocs())
@@ -1029,8 +1022,8 @@ template <class ELFT> void Writer<ELFT>::addPredefinedSections() {
   if (!In<ELFT>::GotPlt->empty())
     addInputSec(In<ELFT>::GotPlt);
 
-  if (!Out<ELFT>::Plt->empty())
-    Add(Out<ELFT>::Plt);
+  if (!In<ELFT>::Plt->empty())
+    addInputSec(In<ELFT>::Plt);
   if (!Out<ELFT>::EhFrame->empty())
     Add(Out<ELFT>::EhFrameHdr);
   if (Out<ELFT>::Bss->Size > 0)
@@ -1172,7 +1165,7 @@ template <class ELFT> std::vector<PhdrEntry<ELFT>> Writer<ELFT>::createPhdrs() {
     Ret.push_back(std::move(TlsHdr));
 
   // Add an entry for .dynamic.
-  if (Out<ELFT>::DynSymTab) {
+  if (In<ELFT>::DynSymTab) {
     Phdr &H = *AddHdr(PT_DYNAMIC, In<ELFT>::Dynamic->OutSec->getPhdrFlags());
     H.add(In<ELFT>::Dynamic->OutSec);
   }
@@ -1485,61 +1478,6 @@ template <class ELFT> void Writer<ELFT>::writeSectionsBinary() {
       Sec->writeTo(Buf + Sec->Offset);
 }
 
-// Convert the .ARM.exidx table entries that use relative PREL31 offsets to
-// Absolute addresses. This form is internal to LLD and is only used to
-// make reordering the table simpler.
-static void ARMExidxEntryPrelToAbs(uint8_t *Loc, uint64_t EntryVA) {
-  uint64_t Addr = Target->getImplicitAddend(Loc, R_ARM_PREL31) + EntryVA;
-  bool InlineEntry =
-      (read32le(Loc + 4) == 1 || (read32le(Loc + 4) & 0x80000000));
-  if (InlineEntry)
-    // Set flag in unused bit of code address so that when we convert back we
-    // know which table entries to leave alone.
-    Addr |= 0x1;
-  else
-    write32le(Loc + 4,
-              Target->getImplicitAddend(Loc + 4, R_ARM_PREL31) + EntryVA + 4);
-  write32le(Loc, Addr);
-}
-
-// Convert the .ARM.exidx table entries from the internal to LLD form using
-// absolute addresses back to relative PREL31 offsets.
-static void ARMExidxEntryAbsToPrel(uint8_t *Loc, uint64_t EntryVA) {
-  uint64_t Off = read32le(Loc) - EntryVA;
-  // ARMExidxEntryPreltoAbs sets bit 0 if the table entry has inline data
-  // that is not an address
-  bool InlineEntry = Off & 0x1;
-  Target->relocateOne(Loc, R_ARM_PREL31, Off & ~0x1);
-  if (!InlineEntry)
-    Target->relocateOne(Loc + 4, R_ARM_PREL31,
-                        read32le(Loc + 4) - (EntryVA + 4));
-}
-
-// The table formed by the .ARM.exidx OutputSection has entries with two
-// 4-byte fields:
-// | PREL31 offset to function | Action to take for function |
-// The table must be ordered in ascending virtual address of the functions
-// identified by the first field of the table. Instead of using the
-// SHF_LINK_ORDER dependency to reorder the sections prior to relocation we
-// sort the table post-relocation.
-// Ref: Exception handling ABI for the ARM architecture
-static void sortARMExidx(uint8_t *Buf, uint64_t OutSecVA, uint64_t Size) {
-  struct ARMExidxEntry {
-    ulittle32_t Target;
-    ulittle32_t Action;
-  };
-  ARMExidxEntry *Start = (ARMExidxEntry *)Buf;
-  size_t NumEnt = Size / sizeof(ARMExidxEntry);
-  for (uint64_t Off = 0; Off < Size; Off += 8)
-    ARMExidxEntryPrelToAbs(Buf + Off, OutSecVA + Off);
-  std::stable_sort(Start, Start + NumEnt,
-                   [](const ARMExidxEntry &A, const ARMExidxEntry &B) {
-                     return A.Target < B.Target;
-                   });
-  for (uint64_t Off = 0; Off < Size; Off += 8)
-    ARMExidxEntryAbsToPrel(Buf + Off, OutSecVA + Off);
-}
-
 // Write section contents to a mmap'ed file.
 template <class ELFT> void Writer<ELFT>::writeSections() {
   uint8_t *Buf = Buffer->getBufferStart();
@@ -1562,11 +1500,6 @@ template <class ELFT> void Writer<ELFT>::writeSections() {
   for (OutputSectionBase *Sec : OutputSections)
     if (Sec != Out<ELFT>::Opd && Sec != Out<ELFT>::EhFrameHdr)
       Sec->writeTo(Buf + Sec->Offset);
-
-  OutputSectionBase *ARMExidx = findSection(".ARM.exidx");
-  if (!Config->Relocatable)
-    if (auto *OS = dyn_cast_or_null<OutputSection<ELFT>>(ARMExidx))
-      sortARMExidx(Buf + OS->Offset, OS->Addr, OS->Size);
 
   // The .eh_frame_hdr depends on .eh_frame section contents, therefore
   // it should be written after .eh_frame is written.

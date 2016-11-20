@@ -175,7 +175,7 @@ protected:
     if (!StopProcessIfNecessary(m_exe_ctx.GetProcessPtr(), state, result))
       return false;
 
-    const char *target_settings_argv0 = target->GetArg0();
+    llvm::StringRef target_settings_argv0 = target->GetArg0();
 
     // Determine whether we will disable ASLR or leave it in the default state
     // (i.e. enabled if the platform supports it).
@@ -210,9 +210,9 @@ protected:
       m_options.launch_info.GetEnvironmentEntries().AppendArguments(
           environment);
 
-    if (target_settings_argv0) {
+    if (!target_settings_argv0.empty()) {
       m_options.launch_info.GetArguments().AppendArgument(
-          llvm::StringRef(target_settings_argv0));
+          target_settings_argv0);
       m_options.launch_info.SetExecutableFile(
           exe_module_sp->GetPlatformFileSpec(), false);
     } else {
@@ -472,7 +472,7 @@ protected:
       Error error;
 
       error = m_interpreter.GetDebugger().GetTargetList().CreateTarget(
-          m_interpreter.GetDebugger(), nullptr, nullptr, false,
+          m_interpreter.GetDebugger(), "", "", false,
           nullptr, // No platform options
           new_target_sp);
       target = new_target_sp.get();

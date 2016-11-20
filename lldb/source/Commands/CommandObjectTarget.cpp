@@ -278,7 +278,7 @@ protected:
       Debugger &debugger = m_interpreter.GetDebugger();
 
       TargetSP target_sp;
-      const char *arch_cstr = m_arch_option.GetArchitectureName();
+      llvm::StringRef arch_cstr = m_arch_option.GetArchitectureName();
       const bool get_dependent_files =
           m_add_dependents.GetOptionValue().GetCurrentValue();
       Error error(debugger.GetTargetList().CreateTarget(
@@ -377,7 +377,7 @@ protected:
             target_sp->GetExecutableSearchPaths().Append(core_file_dir);
 
             ProcessSP process_sp(target_sp->CreateProcess(
-                m_interpreter.GetDebugger().GetListener(), nullptr,
+                m_interpreter.GetDebugger().GetListener(), llvm::StringRef(),
                 &core_file));
 
             if (process_sp) {
