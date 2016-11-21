@@ -241,8 +241,8 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
   In<ELFT>::RelaDyn = make<RelocationSection<ELFT>>(
       Config->Rela ? ".rela.dyn" : ".rel.dyn", Config->ZCombreloc);
   In<ELFT>::ShStrTab = make<StringTableSection<ELFT>>(".shstrtab", false);
-  Out<ELFT>::VerSym = make<VersionTableSection<ELFT>>();
-  Out<ELFT>::VerNeed = make<VersionNeedSection<ELFT>>();
+  In<ELFT>::VerSym = make<VersionTableSection<ELFT>>();
+  In<ELFT>::VerNeed = make<VersionNeedSection<ELFT>>();
 
   Out<ELFT>::ElfHeader = make<OutputSectionBase>("", 0, SHF_ALLOC);
   Out<ELFT>::ElfHeader->Size = sizeof(Elf_Ehdr);
@@ -261,14 +261,14 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
   }
 
   if (Config->EhFrameHdr)
-    Out<ELFT>::EhFrameHdr = make<EhFrameHeader<ELFT>>();
+    In<ELFT>::EhFrameHdr = make<EhFrameHeader<ELFT>>();
 
   if (Config->GnuHash)
     In<ELFT>::GnuHashTab = make<GnuHashTableSection<ELFT>>();
   if (Config->SysvHash)
     In<ELFT>::HashTab = make<HashTableSection<ELFT>>();
   if (Config->GdbIndex)
-    Out<ELFT>::GdbIndex = make<GdbIndexSection<ELFT>>();
+    In<ELFT>::GdbIndex = make<GdbIndexSection<ELFT>>();
 
   In<ELFT>::RelaPlt = make<RelocationSection<ELFT>>(
       Config->Rela ? ".rela.plt" : ".rel.plt", false /*Sort*/);
@@ -288,7 +288,7 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
     Out<ELFT>::MipsRldMap->updateAlignment(sizeof(uintX_t));
   }
   if (!Config->VersionDefinitions.empty())
-    Out<ELFT>::VerDef = make<VersionDefinitionSection<ELFT>>();
+    In<ELFT>::VerDef = make<VersionDefinitionSection<ELFT>>();
 
   // Initialize linker generated sections
   if (!Config->Relocatable)
@@ -948,7 +948,7 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
       In<ELFT>::DynSymTab->addSymbol(Body);
       if (auto *SS = dyn_cast<SharedSymbol<ELFT>>(Body))
         if (SS->file()->isNeeded())
-          Out<ELFT>::VerNeed->addSymbol(SS);
+          In<ELFT>::VerNeed->addSymbol(SS);
     }
   }
 
@@ -979,8 +979,10 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
   finalizeSynthetic<ELFT>(
       {In<ELFT>::DynSymTab, In<ELFT>::GnuHashTab, In<ELFT>::HashTab,
        In<ELFT>::SymTab, In<ELFT>::ShStrTab, In<ELFT>::StrTab,
-       In<ELFT>::DynStrTab, In<ELFT>::Got, In<ELFT>::MipsGot, In<ELFT>::GotPlt,
-       In<ELFT>::RelaDyn, In<ELFT>::RelaPlt, In<ELFT>::Plt, In<ELFT>::Dynamic});
+       In<ELFT>::DynStrTab, In<ELFT>::GdbIndex, In<ELFT>::Got,
+       In<ELFT>::MipsGot, In<ELFT>::GotPlt, In<ELFT>::RelaDyn,
+       In<ELFT>::RelaPlt, In<ELFT>::Plt, In<ELFT>::EhFrameHdr, In<ELFT>::VerDef,
+       In<ELFT>::VerSym, In<ELFT>::VerNeed, In<ELFT>::Dynamic});
 }
 
 template <class ELFT> bool Writer<ELFT>::needsGot() {
@@ -1006,20 +1008,20 @@ template <class ELFT> void Writer<ELFT>::addPredefinedSections() {
 
   // This order is not the same as the final output order
   // because we sort the sections using their attributes below.
-  if (Out<ELFT>::GdbIndex && Out<ELFT>::DebugInfo)
-    Add(Out<ELFT>::GdbIndex);
+  if (In<ELFT>::GdbIndex && Out<ELFT>::DebugInfo)
+    addInputSec(In<ELFT>::GdbIndex);
   addInputSec(In<ELFT>::SymTab);
   addInputSec(In<ELFT>::ShStrTab);
   addInputSec(In<ELFT>::StrTab);
   if (In<ELFT>::DynSymTab) {
     addInputSec(In<ELFT>::DynSymTab);
 
-    bool HasVerNeed = Out<ELFT>::VerNeed->getNeedNum() != 0;
-    if (Out<ELFT>::VerDef || HasVerNeed)
-      Add(Out<ELFT>::VerSym);
-    Add(Out<ELFT>::VerDef);
+    bool HasVerNeed = In<ELFT>::VerNeed->getNeedNum() != 0;
+    if (In<ELFT>::VerDef || HasVerNeed)
+      addInputSec(In<ELFT>::VerSym);
+    addInputSec(In<ELFT>::VerDef);
     if (HasVerNeed)
-      Add(Out<ELFT>::VerNeed);
+      addInputSec(In<ELFT>::VerNeed);
 
     addInputSec(In<ELFT>::GnuHashTab);
     addInputSec(In<ELFT>::HashTab);
@@ -1050,7 +1052,7 @@ template <class ELFT> void Writer<ELFT>::addPredefinedSections() {
   if (!In<ELFT>::Plt->empty())
     addInputSec(In<ELFT>::Plt);
   if (!Out<ELFT>::EhFrame->empty())
-    Add(Out<ELFT>::EhFrameHdr);
+    addInputSec(In<ELFT>::EhFrameHdr);
   if (Out<ELFT>::Bss->Size > 0)
     Add(Out<ELFT>::Bss);
 }
@@ -1201,9 +1203,10 @@ template <class ELFT> std::vector<PhdrEntry<ELFT>> Writer<ELFT>::createPhdrs() {
     Ret.push_back(std::move(RelRo));
 
   // PT_GNU_EH_FRAME is a special section pointing on .eh_frame_hdr.
-  if (!Out<ELFT>::EhFrame->empty() && Out<ELFT>::EhFrameHdr) {
-    Phdr &Hdr = *AddHdr(PT_GNU_EH_FRAME, Out<ELFT>::EhFrameHdr->getPhdrFlags());
-    Hdr.add(Out<ELFT>::EhFrameHdr);
+  if (!Out<ELFT>::EhFrame->empty() && In<ELFT>::EhFrameHdr) {
+    Phdr &Hdr =
+        *AddHdr(PT_GNU_EH_FRAME, In<ELFT>::EhFrameHdr->OutSec->getPhdrFlags());
+    Hdr.add(In<ELFT>::EhFrameHdr->OutSec);
   }
 
   // PT_OPENBSD_RANDOMIZE specifies the location and size of a part of the
@@ -1522,14 +1525,16 @@ template <class ELFT> void Writer<ELFT>::writeSections() {
     Out<ELFT>::Opd->writeTo(Buf + Out<ELFT>::Opd->Offset);
   }
 
+  OutputSectionBase *EhFrameHdr =
+      In<ELFT>::EhFrameHdr ? In<ELFT>::EhFrameHdr->OutSec : nullptr;
   for (OutputSectionBase *Sec : OutputSections)
-    if (Sec != Out<ELFT>::Opd && Sec != Out<ELFT>::EhFrameHdr)
+    if (Sec != Out<ELFT>::Opd && Sec != EhFrameHdr)
       Sec->writeTo(Buf + Sec->Offset);
 
   // The .eh_frame_hdr depends on .eh_frame section contents, therefore
   // it should be written after .eh_frame is written.
-  if (!Out<ELFT>::EhFrame->empty() && Out<ELFT>::EhFrameHdr)
-    Out<ELFT>::EhFrameHdr->writeTo(Buf + Out<ELFT>::EhFrameHdr->Offset);
+  if (!Out<ELFT>::EhFrame->empty() && EhFrameHdr)
+    EhFrameHdr->writeTo(Buf + EhFrameHdr->Offset);
 }
 
 template <class ELFT> void Writer<ELFT>::writeBuildId() {
