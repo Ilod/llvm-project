@@ -294,21 +294,10 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
   if (!Config->Relocatable)
     Symtab<ELFT>::X->Sections.push_back(createCommentSection<ELFT>());
 
-  if (Config->BuildId == BuildIdKind::Fast)
-    In<ELFT>::BuildId = make<BuildIdFastHash<ELFT>>();
-  else if (Config->BuildId == BuildIdKind::Md5)
-    In<ELFT>::BuildId = make<BuildIdMd5<ELFT>>();
-  else if (Config->BuildId == BuildIdKind::Sha1)
-    In<ELFT>::BuildId = make<BuildIdSha1<ELFT>>();
-  else if (Config->BuildId == BuildIdKind::Uuid)
-    In<ELFT>::BuildId = make<BuildIdUuid<ELFT>>();
-  else if (Config->BuildId == BuildIdKind::Hexstring)
-    In<ELFT>::BuildId = make<BuildIdHexstring<ELFT>>();
-  else
-    In<ELFT>::BuildId = nullptr;
-
-  if (In<ELFT>::BuildId)
+  if (Config->BuildId != BuildIdKind::None) {
+    In<ELFT>::BuildId = make<BuildIdSection<ELFT>>();
     Symtab<ELFT>::X->Sections.push_back(In<ELFT>::BuildId);
+  }
 
   InputSection<ELFT> *Common = createCommonSection<ELFT>();
   if (!Common->Data.empty()) {
@@ -1267,11 +1256,13 @@ template <class ELFT> void Writer<ELFT>::fixSectionAlignments() {
 // sections. These are special, we do not include them into output sections
 // list, but have them to simplify the code.
 template <class ELFT> void Writer<ELFT>::fixHeaders() {
-  uintX_t BaseVA = ScriptConfig->HasSections ? 0 : Config->ImageBase;
-  Out<ELFT>::ElfHeader->Addr = BaseVA;
-  uintX_t Off = Out<ELFT>::ElfHeader->Size;
-  Out<ELFT>::ProgramHeaders->Addr = Off + BaseVA;
   Out<ELFT>::ProgramHeaders->Size = sizeof(Elf_Phdr) * Phdrs.size();
+  // If the script has SECTIONS, assignAddresses will compute the values.
+  if (ScriptConfig->HasSections)
+    return;
+  uintX_t BaseVA = Config->ImageBase;
+  Out<ELFT>::ElfHeader->Addr = BaseVA;
+  Out<ELFT>::ProgramHeaders->Addr = BaseVA + Out<ELFT>::ElfHeader->Size;
 }
 
 // Assign VAs (addresses at run-time) to output sections.
