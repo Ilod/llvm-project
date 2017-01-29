@@ -66,20 +66,20 @@ endfunction()
 
 function(add_llvm_symbol_exports target_name export_file)
   if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    set(native_export_file "${target_name}.exports")
+    set(native_export_file "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/${target_name}.exports")
     add_custom_command(OUTPUT ${native_export_file}
       COMMAND sed -e "s/^/_/" < ${export_file} > ${native_export_file}
       DEPENDS ${export_file}
       VERBATIM
       COMMENT "Creating export file for ${target_name}")
     set_property(TARGET ${target_name} APPEND_STRING PROPERTY
-                 LINK_FLAGS " -Wl,-exported_symbols_list,${CMAKE_CURRENT_BINARY_DIR}/${native_export_file}")
+                 LINK_FLAGS " -Wl,-exported_symbols_list,${native_export_file}")
   elseif(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
     set_property(TARGET ${target_name} APPEND_STRING PROPERTY
                  LINK_FLAGS " -Wl,-bE:${export_file}")
   elseif(LLVM_HAVE_LINK_VERSION_SCRIPT)
     # Gold and BFD ld require a version script rather than a plain list.
-    set(native_export_file "${target_name}.exports")
+    set(native_export_file "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/${target_name}.exports")
     # FIXME: Don't write the "local:" line on OpenBSD.
     add_custom_command(OUTPUT ${native_export_file}
       COMMAND echo "{" > ${native_export_file}
@@ -92,13 +92,13 @@ function(add_llvm_symbol_exports target_name export_file)
       COMMENT "Creating export file for ${target_name}")
     if (${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
       set_property(TARGET ${target_name} APPEND_STRING PROPERTY
-                   LINK_FLAGS "  -Wl,-M,${CMAKE_CURRENT_BINARY_DIR}/${native_export_file}")
+                   LINK_FLAGS "  -Wl,-M,${native_export_file}")
     else()
       set_property(TARGET ${target_name} APPEND_STRING PROPERTY
-                   LINK_FLAGS "  -Wl,--version-script,${CMAKE_CURRENT_BINARY_DIR}/${native_export_file}")
+                   LINK_FLAGS "  -Wl,--version-script,${native_export_file}")
     endif()
   else()
-    set(native_export_file "${target_name}.def")
+    set(native_export_file "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/${target_name}.def")
 
     add_custom_command(OUTPUT ${native_export_file}
       COMMAND ${PYTHON_EXECUTABLE} -c "import sys;print(''.join(['EXPORTS\\n']+sys.stdin.readlines(),))"
@@ -106,7 +106,7 @@ function(add_llvm_symbol_exports target_name export_file)
       DEPENDS ${export_file}
       VERBATIM
       COMMENT "Creating export file for ${target_name}")
-    set(export_file_linker_flag "${CMAKE_CURRENT_BINARY_DIR}/${native_export_file}")
+    set(export_file_linker_flag "${native_export_file}")
     get_target_property(llvm_install_tool ${target_name} LLVM_INSTALL_TOOL)
     if (${llvm_install_tool})
       install(FILES ${export_file_linker_flag}
